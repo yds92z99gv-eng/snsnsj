@@ -1906,25 +1906,88 @@ let acur=null,asec='att',acls='all';
 const ldk=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'),nowT=()=>{const n=new Date();return String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0')};
 (()=>{const d=document.createElement('div');d.id='ap';document.body.appendChild(d)})();
 function aRec(id,patch){try{const D=adb();if(D&&patch&&patch.s){D.att=D.att||{};D.att[ldk(new Date())+'|'+String(id).replace(/^a_/,'')]=patch.s;localStorage.setItem(ADMIN_KEY,JSON.stringify(D))}}catch(e){}const a=store.get('att',{}),dy=ldk(new Date());a[dy]=a[dy]||{};if(patch===null){delete a[dy][id]}else{a[dy][id]=Object.assign(a[dy][id]||{},patch)}store.set('att',a)}
+
+/* ===== حركات الدخول والخروج المتعددة (لكل طالب في اليوم: دخول/خروج/دخول... مع البوابة والسبب) ===== */
+const MVREA=['موعد طبي','مرض','استئذان ولي الأمر','حضور ولي الأمر','مهمة إدارية','أخرى'];
+let mvTab='st',mvGf='all',mvSheet=null;
+const aGates=()=>{const g=store.get('gates',null);return Array.isArray(g)&&g.length?g:['البوابة الرئيسية','بوابة الحافلات']};
+const aGate=()=>{const g=aGates(),c=store.get('agate','');return g.includes(c)?c:g[0]};
+function mvList(r){if(!r)return[];if(Array.isArray(r.mv)&&r.mv.length)return r.mv;const m=[];if(r.in)m.push({t:'in',tm:r.in,g:'',r:''});if(r.out)m.push({t:'out',tm:r.out,g:'',r:''});return m}
+function mvSt(r){const m=mvList(r);return m.length?m[m.length-1].t:'none'}
+function mvSave(id,r,dy){
+ const a=store.get('att',{});a[dy]=a[dy]||{};if(r)a[dy][id]=r;else delete a[dy][id];store.set('att',a);
+ try{const D=adb();if(D){const k=dy+'|'+String(id).replace(/^a_/,'');D.att=D.att||{};D.attMv=D.attMv||{};
+  if(r){D.att[k]=r.s;if(r.mv&&r.mv.length)D.attMv[k]=r.mv;else delete D.attMv[k]}else{delete D.att[k];delete D.attMv[k]}
+  localStorage.setItem(ADMIN_KEY,JSON.stringify(D))}}catch(e){}}
+function aMove(id,type,reason){
+ const dy=ldk(new Date()),a=store.get('att',{}),r=Object.assign({},(a[dy]||{})[id]||{});
+ r.mv=mvList(r).slice();r.mv.push({t:type,tm:nowT(),g:aGate(),r:reason||''});
+ const f=r.mv.find(x=>x.t=='in');if(f)r.in=f.tm;
+ const l=r.mv[r.mv.length-1];if(l.t=='out')r.out=l.tm;else delete r.out;
+ if(!r.s||r.s=='a'){r.s='p';r.auto=1}
+ mvSave(id,r,dy)}
+function aMoveUndo(id){
+ const dy=ldk(new Date()),a=store.get('att',{}),r0=(a[dy]||{})[id];if(!r0)return;const r=Object.assign({},r0);
+ r.mv=mvList(r).slice();r.mv.pop();
+ if(!r.mv.length){delete r.mv;delete r.out;if(r.auto){mvSave(id,null,dy);return}delete r.in}
+ else{const f=r.mv.find(x=>x.t=='in');if(f)r.in=f.tm;const l=r.mv[r.mv.length-1];if(l.t=='out')r.out=l.tm;else delete r.out}
+ mvSave(id,r,dy)}
+(function(){const st=document.createElement('style');st.textContent='#ap .mvr{padding:12px 0;border-top:1px solid var(--line)}#ap .mvh{display:flex;justify-content:space-between;gap:8px;align-items:baseline}#ap .mvt{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}#ap .mvc{font-size:11.5px;font-weight:700;padding:4px 10px;border-radius:99px;border:1px solid var(--line);color:var(--ink)}#ap .mvc.in{background:#0a7a4518;border-color:#0a7a4540}#ap .mvc.out{background:#c4262e14;border-color:#c4262e40}#ap .mvb{display:flex;gap:8px;margin-top:10px}#ap .mvb button{flex:1}#ap .mvs{position:fixed;inset:0;background:#0007;z-index:300;display:flex;align-items:flex-end}#ap .mvsb{background:var(--card);width:100%;border-radius:22px 22px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px))}#ap .mvsb h3{margin:0 0 12px;font-size:16px}#ap .mvsb input{width:100%;margin-top:12px;padding:11px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit}#ap .mvq{width:100%;margin-top:12px;padding:11px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit}#ap .mvl{display:flex;gap:10px;padding:10px 0;border-top:1px solid var(--line);align-items:baseline}#ap .mvl time{font-weight:800;min-width:46px;direction:ltr}';document.head.appendChild(st)})();
+function mvHtml(L,R,chips,dt){
+ const wk=new Date().getDay()>4;if(wk)return'<div class="card">'+EM('اليوم عطلة، لا توجد حركات','cal')+'</div>';
+ const gs=aGates(),g=aGate(),ins=U.filter(u=>mvSt(R[u.id])=='in').length,outs=U.filter(u=>mvSt(R[u.id])=='out').length,none=U.length-ins-outs;
+ const tabs='<div class="sg" style="margin-top:12px"><button data-mt="st" class="'+(mvTab=='st'?'on p':'')+'">الطلاب</button><button data-mt="log" class="'+(mvTab=='log'?'on p':'')+'">سجل البوابات</button></div>';
+ let h='<div class="card"><h2>حركات الدخول والخروج</h2><small style="color:var(--mut)">'+dt+'</small><div class="sts" style="margin-top:12px"><div><b style="color:var(--green)">'+ins+'</b>داخل المدرسة</div><div><b style="color:var(--red)">'+outs+'</b>خرجوا</div><div><b>'+none+'</b>لم يدخلوا</div></div>'+tabs;
+ if(mvTab=='st'){
+  h+='<div class="pfr" style="margin-top:12px"><span>البوابة الحالية</span><b>'+escH(g)+'</b></div><div class="days" style="margin-top:6px">'+gs.map(x=>'<button class="chip '+(x==g?'on':'')+'" data-mg="'+escH(x)+'">'+escH(x)+'</button>').join('')+'<button class="chip" data-mga="1">+ بوابة</button></div>'+chips+'<input class="mvq" id="mvq" placeholder="بحث باسم الطالب">';
+  h+='</div><div class="card" id="mvlist">'+(L.map(u=>{const r=R[u.id]||{},m=mvList(r),st=mvSt(r),l=m[m.length-1];
+   const stx=st=='none'?'لم يدخل':st=='in'?'داخل منذ '+l.tm:'خرج '+l.tm+(l.r?' · '+escH(l.r):'');
+   return'<div class="mvr" data-n="'+escH(u.n)+'"><div class="mvh"><b>'+escH(u.n)+'</b><small style="color:var(--mut)">'+u.c+' · '+stx+'</small></div>'
+   +(m.length?'<div class="mvt">'+m.map(x=>'<span class="mvc '+x.t+'">'+(x.t=='in'?'دخول ':'خروج ')+x.tm+(x.g?' · '+escH(x.g):'')+(x.r?' · '+escH(x.r):'')+'</span>').join('')+'</div>':'')
+   +'<div class="mvb">'+(st=='in'?'<button class="ob" data-mo="'+u.id+'">تسجيل خروج</button>':'<button class="ob" data-mi="'+u.id+'">تسجيل دخول</button>')+(m.length?'<button class="oc" data-mu="'+u.id+'">تراجع</button>':'')+'</div></div>'}).join('')||EM('لم يتم تسجيل طلاب حتى الآن','user'))+'</div>';
+ }else{
+  const all=[];L.forEach(u=>mvList(R[u.id]).forEach(x=>all.push(Object.assign({n:u.n,c:u.c},x))));all.sort((a,b)=>a.tm<b.tm?-1:a.tm>b.tm?1:0);
+  const fl=all.filter(x=>mvGf=='all'||(x.g||'')==mvGf);
+  const sm=gs.map(x=>{const a=all.filter(y=>y.g==x);return'<div class="pfr"><span>'+escH(x)+'</span><b>دخول '+a.filter(y=>y.t=='in').length+' · خروج '+a.filter(y=>y.t=='out').length+'</b></div>'}).join('');
+  h+='<div style="margin-top:6px">'+sm+'</div><div class="days" style="margin-top:10px"><button class="chip '+(mvGf=='all'?'on':'')+'" data-mf="all">كل البوابات</button>'+gs.map(x=>'<button class="chip '+(mvGf==x?'on':'')+'" data-mf="'+escH(x)+'">'+escH(x)+'</button>').join('')+'</div>'+chips+'</div><div class="card">'
+   +(fl.map(x=>'<div class="mvl"><time>'+x.tm+'</time><span><b>'+escH(x.n)+'</b> — '+(x.t=='in'?'دخول':'خروج')+'<small style="display:block;color:var(--mut)">'+(x.g?escH(x.g):'بدون بوابة')+(x.r?' · '+escH(x.r):'')+'</small></span></div>').join('')||EM('لا توجد حركات مسجّلة اليوم','doc'))+'</div>';
+ }
+ if(mvSheet){const u=U.find(x=>x.id==mvSheet.id)||{n:''};
+  h+='<div class="mvs"><div class="mvsb"><h3>سبب خروج: '+escH(u.n)+'</h3><div class="days">'+MVREA.map(x=>'<button class="chip '+(mvSheet.r==x?'on':'')+'" data-mr="'+escH(x)+'">'+x+'</button>').join('')+'</div><input id="mvrt" placeholder="سبب آخر أو ملاحظة (اختياري)" value="'+escH(mvSheet.t||'')+'"><div class="mvb"><button class="ob" id="mvok">تأكيد الخروج</button><button class="oc" id="mvno">إلغاء</button></div></div></div>'}
+ return h}
+function mvBind(e){
+ const q=s=>e.querySelector(s),qa=s=>e.querySelectorAll(s),nm=id=>(U.find(x=>x.id==id)||{}).n||'';
+ qa('[data-mt]').forEach(b=>b.onclick=()=>{mvTab=b.dataset.mt;drawA()});
+ qa('[data-mg]').forEach(b=>b.onclick=()=>{store.set('agate',b.dataset.mg);drawA()});
+ qa('[data-mf]').forEach(b=>b.onclick=()=>{mvGf=b.dataset.mf;drawA()});
+ qa('[data-mga]').forEach(b=>b.onclick=()=>{const n=(prompt('اسم البوابة الجديدة')||'').trim();if(n){const g=aGates().slice();if(!g.includes(n))g.push(n);store.set('gates',g);store.set('agate',n)}drawA()});
+ qa('[data-mi]').forEach(b=>b.onclick=()=>{aMove(b.dataset.mi,'in','');tmsg('تم تسجيل دخول '+nm(b.dataset.mi)+' ✓',1);drawA()});
+ qa('[data-mo]').forEach(b=>b.onclick=()=>{mvSheet={id:b.dataset.mo,r:'',t:''};drawA()});
+ qa('[data-mu]').forEach(b=>b.onclick=()=>{aMoveUndo(b.dataset.mu);tmsg('تم التراجع عن آخر حركة',1);drawA()});
+ qa('[data-mr]').forEach(b=>b.onclick=()=>{mvSheet.t=(q('#mvrt')||{}).value||'';mvSheet.r=mvSheet.r==b.dataset.mr?'':b.dataset.mr;drawA()});
+ const ok=q('#mvok');if(ok)ok.onclick=()=>{const t=((q('#mvrt')||{}).value||'').trim(),r=t||mvSheet.r;if(!r){tmsg('اختر سبب الخروج أو اكتبه');return}aMove(mvSheet.id,'out',r);tmsg('تم تسجيل خروج '+nm(mvSheet.id)+' ✓',1);mvSheet=null;drawA()};
+ const no=q('#mvno');if(no)no.onclick=()=>{mvSheet=null;drawA()};
+ const sr=q('#mvq');if(sr)sr.oninput=()=>{const v=sr.value.trim();qa('#mvlist .mvr').forEach(r=>{r.style.display=!v||r.dataset.n.indexOf(v)>-1?'':'none'})}}
 function startA(k){acur=k;asec='att';acls='all';$('#lg').classList.add('off');$('#ap').classList.add('on');drawA()}
 function drawA(){const e=$('#ap'),dy=ldk(new Date()),R=store.get('att',{})[dy]||{},wk=new Date().getDay()>4,CL=[...new Set(U.map(u=>u.c))],L=U.filter(u=>acls=='all'||u.c==acls),
  sv=p=>`<svg viewBox="0 0 24 24" aria-hidden="true">${p}</svg>`,
- nv=[['att','الحضور',sv('<circle cx="12" cy="12" r="8.5"/><path d="M8.3 12.4l2.5 2.5 5-5.4"/>')],['out','الانصراف',sv('<path d="M14 4.5h4a2 2 0 012 2v11a2 2 0 01-2 2h-4"/><path d="M10 8l-4 4 4 4M6 12h10"/>')],['me','حسابي',sv('<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4.5 4.5-6.5 8-6.5s7 2 8 6.5"/>')]],
+ nv=[['att','الحضور',sv('<circle cx="12" cy="12" r="8.5"/><path d="M8.3 12.4l2.5 2.5 5-5.4"/>')],['out','الانصراف',sv('<path d="M14 4.5h4a2 2 0 012 2v11a2 2 0 01-2 2h-4"/><path d="M10 8l-4 4 4 4M6 12h10"/>')],['mv','الحركات',sv('<path d="M7 7h11l-3-3M17 17H6l3 3"/>')],['me','حسابي',sv('<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4.5 4.5-6.5 8-6.5s7 2 8 6.5"/>')]],
  dt=new Date().toLocaleDateString('ar-LY',{weekday:'long',day:'numeric',month:'long'}),
  cnt=s=>U.filter(u=>(R[u.id]||{}).s==s).length,none=U.filter(u=>!R[u.id]).length,
  chips=`<div class="days" style="margin-top:12px"><button class="chip ${acls=='all'?'on':''}" data-ac="all">كل الفصول</button>${CL.map(c=>`<button class="chip ${acls==c?'on':''}" data-ac="${c}">${c}</button>`).join('')}</div>`;let h='';
  if(asec=='att'){h=`<div class="card"><h2>تحضير اليوم</h2><small style="color:var(--mut)">${dt}</small><div class="sts" style="margin-top:12px"><div><b style="color:var(--green)">${cnt('p')}</b>حاضر</div><div><b style="color:#d4a017">${cnt('l')}</b>متأخر</div><div><b style="color:var(--red)">${cnt('a')}</b>غائب</div><div><b>${none}</b>لم يُسجّل</div></div>${chips}${wk?'':'<button class="btn" id="aall">تحضير الجميع حاضر</button>'}</div>`+(wk?'<div class="card">'+EM('اليوم عطلة، لا يوجد تحضير','cal')+'</div>':`<div class="card">${L.map(u=>{const r=R[u.id]||{};return`<div style="padding:12px 0;border-top:1px solid var(--line)"><div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><b>${escH(u.n)}</b><small style="color:var(--mut)">${u.c}${r.in?' · دخول '+r.in:''}</small></div><div class="sg" style="margin-top:8px">${[['p','حاضر'],['l','متأخر'],['a','غائب']].map(x=>`<button data-as="${x[0]}:${u.id}" class="${r.s==x[0]?'on '+x[0]:''}">${x[1]}</button>`).join('')}</div></div>`}).join('')||EM('لم يتم تسجيل طلاب حتى الآن','user')}</div>`)}
  if(asec=='out'){const P=L.filter(u=>(R[u.id]||{}).s=='p'||(R[u.id]||{}).s=='l'),od=P.filter(u=>R[u.id].out).length;h=`<div class="card"><h2>انصراف اليوم</h2><small style="color:var(--mut)">${dt}</small><div class="sts" style="margin-top:12px"><div><b>${P.length}</b>داخل المدرسة</div><div><b style="color:var(--green)">${od}</b>انصرفوا</div><div><b>${P.length-od}</b>متبقون</div></div>${chips}${P.length-od?'<button class="btn" id="oall">تسجيل انصراف الجميع</button>':''}</div><div class="card">`+(P.map(u=>{const r=R[u.id];return`<div class="pfr" style="align-items:center"><span><b style="color:var(--ink)">${escH(u.n)}</b><small style="display:block">${u.c} · دخول ${r.in||'—'}${r.out?' · انصراف '+r.out:''}</small></span><button class="${r.out?'oc':'ob'}" data-ao="${u.id}">${r.out?'إلغاء':'تسجيل انصراف'}</button></div>`}).join('')||EM('لم يتم تسجيل حضور أي طالب حتى الآن','user'))+'</div>'}
+ if(asec=='mv')h=mvHtml(L,R,chips,dt);
  if(asec=='me')h=`<div class="card"><h2>بياناتي</h2><div class="pfr"><span>الاسم</span><b>${escH(acur.n)}</b></div><div class="pfr"><span>الصفة</span><b>${escH(acur.role)}</b></div><div class="pfr"><span>اسم المستخدم</span><b dir="ltr">${acur.id}</b></div></div><button class="lgo" onclick="$('#cf').classList.add('on')">تسجيل الخروج</button>`;
  const keep=e.dataset.sec==asec?($('#asc')||{}).scrollTop:0;
  e.innerHTML=`<div id="asc"><header><div class="hd"><img src="${$('.hd img').src}" alt=""><div><h1>مدرسة اقرأ</h1><p>الحضور والانصراف</p></div><button class="theme" data-ag="me" aria-label="الملف الشخصي">${sv('<circle cx="12" cy="8" r="3.6"/><path d="M4.5 20.5c0-4 3.3-6.3 7.5-6.3s7.5 2.3 7.5 6.3"/>')}</button></div></header><main>${h}</main></div><nav>${nv.map(([k,l,i])=>`<button data-ag="${k}" class="${k==asec?'on':''}"><i>${i}</i>${l}</button>`).join('')}</nav>`;
- e.dataset.sec=asec;$('#asc').scrollTop=keep||0;
+ e.dataset.sec=asec;$('#asc').scrollTop=keep||0;mvBind(e);
  e.querySelectorAll('[data-ag]').forEach(b=>b.onclick=()=>{asec=b.dataset.ag;drawA()});
  e.querySelectorAll('[data-ac]').forEach(b=>b.onclick=()=>{acls=b.dataset.ac;drawA()});
  e.querySelectorAll('[data-as]').forEach(b=>b.onclick=()=>{const [s,id]=b.dataset.as.split(':'),r=R[id];if(r&&r.s==s){aRec(id,null)}else if(s=='a'){aRec(id,null);aRec(id,{s:'a'})}else{aRec(id,{s,in:(r&&r.in)||nowT()})}drawA()});
  const aa=e.querySelector('#aall');if(aa)aa.onclick=()=>{let n=0;L.forEach(u=>{if(!R[u.id]){aRec(u.id,{s:'p',in:nowT()});n++}});tmsg(n?'تم تحضير '+n+' طالب ✓':'الجميع مسجّل مسبقاً',n?1:0);drawA()};
- e.querySelectorAll('[data-ao]').forEach(b=>b.onclick=()=>{const id=b.dataset.ao,r=R[id];if(r.out){const a=store.get('att',{});delete a[dy][id].out;store.set('att',a)}else aRec(id,{out:nowT()});drawA()});
- const oa=e.querySelector('#oall');if(oa)oa.onclick=()=>{const P=L.filter(u=>R[u.id]&&(R[u.id].s=='p'||R[u.id].s=='l')&&!R[u.id].out);P.forEach(u=>aRec(u.id,{out:nowT()}));tmsg('تم تسجيل انصراف '+P.length+' طالب ✓',1);drawA()};
+ e.querySelectorAll('[data-ao]').forEach(b=>b.onclick=()=>{const id=b.dataset.ao,r=R[id];if(r.out){if(r.mv&&r.mv.length)aMoveUndo(id);else{const a=store.get('att',{});delete a[dy][id].out;store.set('att',a)}}else aMove(id,'out','انصراف نهاية الدوام');drawA()});
+ const oa=e.querySelector('#oall');if(oa)oa.onclick=()=>{const P=L.filter(u=>R[u.id]&&(R[u.id].s=='p'||R[u.id].s=='l')&&!R[u.id].out);P.forEach(u=>aMove(u.id,'out','انصراف نهاية الدوام'));tmsg('تم تسجيل انصراف '+P.length+' طالب ✓',1);drawA()};
 }
 
 const sid=store.get('sess',null),su=U.find(x=>x.id==sid),sp=P.find(x=>x.id==sid),stt=TCH.find(x=>x.id==sid),skm=KM.find(x=>x.id==sid),saa=AM.find(x=>x.id==sid);if(su)start(su);else if(sp){enter(sp);setTimeout(()=>kidModal(sp),2250)}else if(stt)startT(stt);else if(skm)startK(skm);else if(saa)startA(saa)
@@ -2322,6 +2385,25 @@ try{check()}catch(e){}
 })();
 </script>
 
+<script>/* ===== هوية المدرسة في تطبيق الطالب وولي الأمر: لون + شعار + عبارة في صفحة الدخول ===== */
+(function(){try{
+ var HEX=/^#[0-9a-fA-F]{6}$/,DEF='#2f3a49';
+ function adb(){try{return JSON.parse(localStorage.getItem('iqra_admin_v1'))}catch(e){return null}}
+ function lum(h){var c=[1,3,5].map(function(i){return parseInt(h.substr(i,2),16)/255}).map(function(v){return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4)});return .2126*c[0]+.7152*c[1]+.0722*c[2]}
+ function fit(h){if(!HEX.test(h||''))return DEF;h=h.toLowerCase();var n=0;while(lum(h)>.18&&n++<20){h='#'+[1,3,5].map(function(i){return Math.round(parseInt(h.substr(i,2),16)*.9).toString(16).padStart(2,'0')}).join('')}return h}
+ var code='',m=location.search.match(/[?&]school=([^&#]*)/);
+ try{if(m){code=decodeURIComponent(m[1]).trim().toUpperCase();if(code)localStorage.setItem('iqra_brand_code',code)}else code=localStorage.getItem('iqra_brand_code')||''}catch(e){}
+ var d=adb();if(!d||!code)return;
+ var id=null;if(d.set&&d.set.pubCode&&String(d.set.pubCode).toUpperCase()===code)id='main';else{var b=d.pubstBy||{};for(var k in b){if(b[k]&&b[k].code&&String(b[k].code).toUpperCase()===code){id=k;break}}}
+ if(!id)return;var rec=(d.schools||[]).filter(function(x){return x.id==id})[0];if(!rec)return;
+ var c=fit(rec.color);
+ if(HEX.test(rec.color||'')){document.documentElement.style.setProperty('--navy',c);var tc=document.querySelector('meta[name="theme-color"]');if(tc)tc.content=c}
+ document.addEventListener('DOMContentLoaded',function(){var f=document.getElementById('lf'),h=f&&f.querySelector('h1');if(!h)return;
+  if(/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+\/=]+$/.test(rec.logo||'')&&!document.getElementById('brlogo')){var g=document.createElement('img');g.id='brlogo';g.alt='';g.src=rec.logo;g.style.cssText='display:block;width:84px;height:84px;object-fit:contain;border-radius:18px;background:#fff;margin:0 auto 10px';h.parentNode.insertBefore(g,h)}
+  if(rec.slogan&&!document.getElementById('brslg')){var s=document.createElement('div');s.id='brslg';s.textContent=rec.slogan;s.style.cssText='text-align:center;font-size:13px;opacity:.85;margin:2px 0 8px';h.insertAdjacentElement('afterend',s)}});
+}catch(e){}})();
+</script>
+
 <script type="text/plain" id="adminSrc">
 <!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><script>/* alert داخل التطبيق: بعض العارضات (مثل نافذة المعاينة على الآيفون) تحجب alert فلا تظهر الرسائل */
 (function(){var na=window.alert;window.alert=function(m){try{var o=document.createElement('div');o.setAttribute('dir','rtl');o.style.cssText='position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';var b=document.createElement('div');b.style.cssText='background:#fff;color:#1a2431;border-radius:18px;padding:22px 20px 16px;max-width:360px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3);text-align:center;font:700 16px/1.7 inherit';var t=document.createElement('div');t.textContent=String(m);t.style.whiteSpace='pre-wrap';var k=document.createElement('button');k.textContent='حسنًا';k.style.cssText='margin-top:16px;padding:10px 32px;border:0;border-radius:12px;background:#1a2431;color:#fff;font:800 16px inherit;cursor:pointer';k.onclick=function(){o.remove()};o.onclick=function(e){if(e.target===o)o.remove()};b.appendChild(t);b.appendChild(k);o.appendChild(b);(document.body||document.documentElement).appendChild(o)}catch(e){try{na.call(window,m)}catch(_){}}}})();
@@ -2411,6 +2493,7 @@ input[type=checkbox]{width:18px;height:18px}
 .ttb thead tr td{font-weight:800;background:var(--navy);color:#fff;border-color:var(--navy)}
 .ttb td.tt{width:96px;white-space:nowrap;font-size:12px;font-weight:700;background:color-mix(in srgb,var(--navy) 7%,transparent)}
 .tc{position:relative;border-radius:8px;padding:4px 6px;margin:2px 0;background:color-mix(in srgb,var(--c) 14%,transparent);border-right:3px solid var(--c);text-align:right}
+.tc.cf{border-right-color:var(--red);background:color-mix(in srgb,var(--red) 13%,transparent)}.tc .cfl{color:var(--red);font-weight:700}.cfn{display:inline-block;min-width:18px;margin-inline-start:6px;padding:0 5px;border-radius:99px;background:var(--red);color:#fff;font-size:11px;line-height:18px}.btn.g .cfn{background:#fff;color:var(--red)}.smt{margin:4px 0 12px;padding:10px 12px;border-radius:10px;border:1px solid var(--line);font-size:13px;line-height:1.8}.smt.bad{border-color:var(--red);background:color-mix(in srgb,var(--red) 8%,transparent)}.smt.ok{border-color:var(--green);color:var(--green)}.smg{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px;color:var(--ink)}.smc{font:inherit;font-size:12.5px;padding:3px 10px;border-radius:99px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}.cfc{padding:12px;margin-bottom:10px}.cfh{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px}.cft{background:var(--red);color:#fff;border-radius:99px;padding:2px 10px;font-size:12px;font-weight:700}.cfe{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line);font-size:13.5px}
 .tc b{display:block;font-size:12px}.tc small{display:block;color:var(--mut);font-size:11px;line-height:1.3}
 .tx{display:flex;gap:2px}.tx button,.ttb td.tt button{border:0;background:none;cursor:pointer;color:var(--blue);padding:0 4px;font-size:13px}.tx .d,.ttb td.tt .d{color:var(--red)}
 .ta{border:1px dashed var(--line);background:none;border-radius:8px;width:100%;min-height:38px;color:var(--mut);cursor:pointer;font-size:16px}
@@ -2612,7 +2695,7 @@ function scope0(k){const l=db[k];if(cur=='all'||k=='branches')return l;
  if(k=='news'||k=='notes'||k=='subjects')return l.filter(r=>!r.branch||r.branch==cur);
  return l.filter(r=>r.branch==cur)}
 const E={
-branches:{t:'الفروع',one:'فرع',cols:[['name','اسم الفرع',r=>bt(r.id)],['city','المدينة'],['manager','المدير'],['phone','الهاتف'],['n','الطلاب',r=>db.students.filter(s=>s.branch==r.id).length],['k','الموظفون',r=>db.staff.filter(s=>s.branch==r.id).length]],f:[['name','اسم الفرع','text'],['city','المدينة','text'],['manager','مدير الفرع','text'],['phone','الهاتف','tel']]},
+branches:{t:'الفروع',one:'فرع',cols:[['name','اسم الفرع',r=>bt(r.id)],['country','البلد'],['city','المدينة'],['manager','المدير'],['phone','الهاتف'],['n','الطلاب',r=>db.students.filter(s=>s.branch==r.id).length],['k','الموظفون',r=>db.staff.filter(s=>s.branch==r.id).length]],f:[['name','اسم الفرع','text'],['country','البلد','text',null,1],['city','المدينة','text'],['manager','مدير الفرع','text'],['phone','الهاتف','tel']]},
 students:{t:'الطلاب',one:'طالب',cols:[['name','الاسم'],['branch','الفرع',r=>bt(r.branch)],['grade','الصف'],['guardian','ولي الأمر'],['phone','الهاتف'],['status','الحالة',r=>tg(r.status,r.status=='منتظم'?'var(--green)':r.status=='مستجد'?'var(--blue)':'var(--red)')]],f:[['name','اسم الطالب','text'],['branch','الفرع','select',BR],['grade','الصف','select',GR],['guardian','ولي الأمر','text'],['phone','الهاتف','tel'],['status','الحالة','select',['منتظم','مستجد','منقطع']]]},
 staff:{t:'الموظفون والمعلمون',one:'موظف',cols:[['name','الاسم'],['branch','الفرع',r=>bt(r.branch)],['role','الوظيفة'],['subject','المادة'],['phone','الهاتف'],['salary','المرتب',r=>m(r.salary)]],f:[['name','الاسم','text'],['branch','الفرع','select',BR],['role','الوظيفة','select',['معلم','معلمة','إدارية','إداري','محاسب','سائق','حارس']],['subject','المادة','select',['—',...SUB]],['phone','الهاتف','tel'],['salary','المرتب الشهري','number']]},
 fees:{t:'الرسوم المالية',one:'رسم',cols:[['student','الطالب',r=>esc(sn(r.student))],['b','الفرع',r=>bt(stBr(r.student))],['type','البند'],['amount','المبلغ',r=>m(r.amount)],['paid','المدفوع',r=>m(r.paid)],['rem','المتبقي',r=>r.amount-r.paid>0?tg(m(r.amount-r.paid),'var(--red)'):tg('مسدد','var(--green)')],['date','التاريخ']],f:[['student','الطالب','select',ST],['type','البند','select',['رسوم الفصل الأول','رسوم الفصل الثاني','النقل','الكتب','الزي المدرسي']],['amount','إجمالي السعر','number'],['paid','المدفوع','number'],['date','التاريخ','date']]},
@@ -2659,7 +2742,7 @@ const t=GRPS.map((g,i)=>grpItems(i).length?tileH('g_'+i,I[g[3]]||I.set,g[0],g[1]
 used=new Set(GRPS.flatMap(g=>g[2])),rest=NAV.filter(x=>x[0]!='home'&&ok(x[0])&&!used.has(x[0]));
 return`<div class="ph"><h2>لوحة المعلومات</h2></div><div class="tg">${t}</div>${rest.length?`<div class="ng2">أخرى</div><div class="tg">${rest.map((x,j)=>tileH(x[0],I[x[0]]||I.set,x[1],'',TCC[j%4])).join('')}</div>`:''}`}
 function vGrp(i){const L=grpItems(i);return`<div class="ph"><h2>${GRPS[i][0]}</h2><span class="cnt">${L.length}</span></div><div class="tg">${L.map(([k,l],j)=>{let sb='';try{sb=(TSB[k]||(()=>''))()}catch(e){}return tileH(k,I[k]||I.set,l,sb,TCC[j%4])}).join('')}</div>`}
-function vSet(){const s=db.set;return`<div class="ph"><h2>الإعدادات</h2></div><div class="card"><h3>بيانات المدرسة</h3>${[['school','اسم المدرسة'],['office','مكتب الخدمات التعليمية / الإدارة التابعة لها'],['year','العام الدراسي'],['term','الفصل الدراسي']].map(([k,l])=>`<label style="display:block;margin-bottom:10px">${l}<input id="s_${k}" value="${esc(s[k])}" style="display:block;width:100%;max-width:340px"></label>`).join('')}<button class="btn g" onclick="['school','office','year','term'].forEach(k=>db.set[k]=$('#s_'+k).value);save();render()">حفظ</button></div>`}
+function vSet(){const s=db.set;return`<div class="ph"><h2>الإعدادات</h2></div><div class="card"><h3>بيانات المدرسة</h3>${[['school','اسم المدرسة'],['office','مكتب الخدمات التعليمية / الإدارة التابعة لها'],['year','العام الدراسي'],['term','الفصل الدراسي']].map(([k,l])=>`<label style="display:block;margin-bottom:10px">${l}<input id="s_${k}" value="${esc(s[k])}" style="display:block;width:100%;max-width:340px"></label>`).join('')}<button class="btn g" onclick="['school','office','year','term'].forEach(k=>db.set[k]=$('#s_'+k).value);save();render()">حفظ</button></div>${bkCard()}`}
 const I={home:'M3 11l9-7 9 7v9H3z',branches:'M4 20V8l8-4 8 4v12M9 20v-6h6v6',students:'M9 11a3 3 0 100-6 3 3 0 000 6zM3 20c0-3.6 2.7-5.6 6-5.6s6 2 6 5.6M17 5a3 3 0 010 6M18 14.6c1.8.7 3 2.3 3 5.4',staff:'M12 12a3.5 3.5 0 100-7 3.5 3.5 0 000 7zM5 20c0-4 3-6 7-6s7 2 7 6',att:'M4 4h16v16H4zM8 12l3 3 5-6',grades:'M5 20V10M12 20V4M19 20v-7',fees:'M3 6h18v12H3zM3 10h18M7 15h3',news:'M4 5h16v14H4zM8 9h8M8 13h5',set:'M12 15a3 3 0 100-6 3 3 0 000 6zM4 12h2M18 12h2M12 4v2M12 18v2'};
 const NAV=[['home','لوحة المعلومات'],['branches','الفروع'],['students','الطلاب'],['accounts','حسابات الطلاب وأولياء الأمور'],['staff','الموظفون والمعلمون'],['classes','الفصول'],['schedule','الجدول الدراسي'],['att','الحضور'],['grades','الدرجات'],['exams','الاختبارات'],['lessons','الدروس اليومية'],['homework','الواجبات'],['fees','الرسوم المالية'],['payments','الإيصالات'],['expenses','المصروفات'],['canteen','بطاقة المقصف'],['news','الإعلانات'],['payroll','كشوف المرتبات'],['reports','التقارير'],['notes','إشعارات أولياء الأمور'],['log','سجل التعديلات'],['users','المستخدمون'],['perms','الصلاحيات'],['set','الإعدادات']];
 const V={home:vHome,att:vAtt,set:vSet};
@@ -2721,8 +2804,9 @@ V.perms=vPerm;['branches','students','staff','fees','grades','news'].forEach(k=>
 E.expenses={t:'المصروفات',one:'مصروف',cols:[['title','البند'],bc,['cat','التصنيف'],['amt','المبلغ',r=>m(r.amt)],['date','التاريخ']],f:[['title','البند','text'],fb,['cat','التصنيف','select',['رواتب','إيجار','كهرباء ومياه','صيانة','أدوات مكتبية','نقل','أخرى']],['amt','المبلغ','number'],['date','التاريخ','date'],nt]};V.expenses=()=>vTable('expenses');
 E.students.x=r=>`<button onclick="rep('${r.id}')">كشف الدرجات</button>`;
 function dl(n,t,y){try{lg('تصدير','التصدير',n,'')}catch(e){}const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:y}));a.download=n;a.click()}
-const bk=()=>dl('iqra-backup-'+today+'.json',JSON.stringify(db),'application/json');
-function imp(e){const f=e.files[0];f&&f.text().then(t=>{try{const OL=db.log||[];db=JSON.parse(t);db.log=OL;norm();AU_S=auSnap();lg('استعادة','النسخ الاحتياطي',f.name,'');save();render()}catch(x){alert('الملف غير صالح')}})}
+const bk=()=>{db.set=db.set||{};db.set.lastBackup=new Date().toISOString();save();const nm=String(db.set.school||'school').replace(/[^\w\u0600-\u06FF-]+/g,'_');dl('iqra-backup-'+nm+'-'+today+'.json',JSON.stringify(db),'application/json');render()};
+const bkCard=()=>{const c=k=>(db[k]||[]).length,lb=db.set&&db.set.lastBackup,sz=Math.round(JSON.stringify(db).length/1024);return`<div class="card" style="margin-top:14px"><h3>النسخة الاحتياطية</h3><p style="color:var(--mut);font-size:13px;margin:0 0 10px">نسخة كاملة من كل بيانات المدرسة في ملف واحد (JSON): ${c('students')} طالب، ${c('staff')} موظف، ${c('branches')} فرع، ${c('payments')} إيصال، ${c('grades')} درجة — حجمها التقريبي ${sz} ك.ب</p><p style="font-size:13px;margin:0 0 12px">آخر نسخة: <b>${lb?new Date(lb).toLocaleString('en-GB'):'لم تؤخذ بعد'}</b></p><div style="display:flex;flex-direction:column;gap:10px"><button class="btn g" style="display:flex;align-items:center;justify-content:center;width:100%;height:auto;min-height:46px;padding:10px 14px;box-sizing:border-box;white-space:nowrap;margin:0" onclick="bk()">تحميل نسخة احتياطية كاملة</button><label class="btn o" style="display:flex;align-items:center;justify-content:center;width:100%;height:auto;min-height:46px;padding:10px 14px;box-sizing:border-box;white-space:nowrap;margin:0;cursor:pointer">استعادة من نسخة<input type="file" accept=".json,application/json" style="display:none" onchange="if(this.files[0]&&confirm('ستُستبدل كل بيانات المدرسة الحالية بمحتوى الملف. هل تريد المتابعة؟'))imp(this);else this.value=''"></label></div><p style="color:var(--mut);font-size:12px;margin:10px 0 0">احتفظ بالنسخة في مكان آمن؛ تحتوي بيانات الطلاب وكلمات المرور. يُنصح بأخذ نسخة قبل الترقية السنوية وقبل أي حذف جماعي.</p></div>`};
+function imp(e){const f=e.files[0];f&&f.text().then(t=>{try{const NB=JSON.parse(t);if(!NB||typeof NB!='object'||!Array.isArray(NB.students)||!NB.set)throw 0;const OL=db.log||[];db=NB;db.log=OL;norm();AU_S=auSnap();lg('استعادة','النسخ الاحتياطي',f.name,'');save();render()}catch(x){alert('الملف غير صالح')}})}
 function csv(k){const q2=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"',out=(rows)=>dl(k+'.csv','\ufeff'+rows.map(a=>a.map(q2).join(',')).join('\n'),'text/csv');
  const e=E[k];
  /* قائمة الدرجات: تفاصيل الدرجات للطلاب المعروضين فقط */
@@ -2839,7 +2923,7 @@ function tgl(e){const o=e.classList.contains('op');document.querySelectorAll('as
 function go(k){OG=undefined;PG=k;try{history.replaceState(null,'','#'+k)}catch(e){}window.scrollTo(0,0);render()}
 let last='';
 function render(){const u=me();if(!u){login();return}$('#lg').className='md';if(u.branch)cur=u.branch;let p=PG;if(!V[p]||!ok(p))p='home';if(p!=last){q='';last=p}
-{const NG=[['',['home']],['إدارة المنصة',['schools','schpay','plans','platacc','pubreqs']],['الأشخاص',['branches','students','accounts','guardians','staff','users']],['الدراسة',['classes','subjects','assign','schedule','cal','lessons','homework','exams','grades']],['الحضور والإجازات',['att','sattend','leaves','absreq']],['المالية',['fees','payments','expenses','canteen','ledger','payroll']],['الزي',['uniform','uniitems']],['التواصل',['news','albums','notes','msgs','support','meet','pickup']],['النظام',['reports','log','perms','export','certs','trips','buses','transport']]],vis=NAV.filter(n=>ok(n[0])),used=new Set(),lk=([k,l])=>`<a href="#" onclick="go('${k}');return false" class="${k==p?'on':''}"><svg viewBox="0 0 24 24"><path d="${I[k]}"/></svg>${l}</a>`,gr=(t,L)=>{if(!L.length)return'';if(!t)return L.map(lk).join('');const op=OG===undefined?L.some(n=>n[0]==p):OG==t;return `<div class=\"ng gh${op?' op':''}\" role=\"button\" tabindex=\"0\" data-g=\"${t}\" onclick=\"tgl(this)\"><span>${t}</span><b>‹</b></div><div class=\"gb${op?' op':''}\">${L.map(lk).join('')}</div>`},H=NG.map(([t,ks])=>{const L=ks.map(k=>vis.find(n=>n[0]==k)).filter(Boolean);L.forEach(n=>used.add(n[0]));return gr(t,L)}).join(''),rest=vis.filter(n=>!used.has(n[0]));$('#nv').innerHTML=H+gr('أخرى',rest)}
+{const NG=[['',['home']]].concat(GRPS.map(g=>[g[0],g[2]])),vis=NAV.filter(n=>ok(n[0])),used=new Set(),lk=([k,l])=>`<a href="#" onclick="go('${k}');return false" class="${k==p?'on':''}"><svg viewBox="0 0 24 24"><path d="${I[k]}"/></svg>${l}</a>`,gr=(t,L)=>{if(!L.length)return'';if(!t)return L.map(lk).join('');const op=OG===undefined?L.some(n=>n[0]==p):OG==t;return `<div class=\"ng gh${op?' op':''}\" role=\"button\" tabindex=\"0\" data-g=\"${t}\" onclick=\"tgl(this)\"><span>${t}</span><b>‹</b></div><div class=\"gb${op?' op':''}\">${L.map(lk).join('')}</div>`},H=NG.map(([t,ks])=>{const L=ks.map(k=>vis.find(n=>n[0]==k)).filter(Boolean);L.forEach(n=>used.add(n[0]));return gr(t,L)}).join(''),rest=vis.filter(n=>!used.has(n[0]));$('#nv').innerHTML=H+gr('أخرى',rest)}
 $('#ch').innerHTML=(u.branch?[]:[['all','كل الفروع']]).concat(BR().filter(b=>!u.branch||b[0]==u.branch)).map(([id,n],i)=>`<button class="chip ${cur==id?'on':''}" style="--c:${i?COL[(i-1)%5]:'var(--navy)'}" onclick="cur='${id}';render()"><i></i>${esc(n)}</button>`).join('');
 $('#v').innerHTML=V[p]();$('aside h1').textContent=db.set.school;document.body.classList.remove('nv')}
 window.onhashchange=()=>{PG=location.hash.slice(1)||PG;render()};$('#mb').onclick=e=>{e.stopPropagation();document.body.classList.toggle('nv')};$('main').onclick=()=>document.body.classList.remove('nv');
@@ -3015,7 +3099,7 @@ ST={ok:['M5 12.5l4.5 4.5L19 7.5','var(--green)'],review:['M12 7v5l3 2M12 3a9 9 0
 TX={ok:'منشور',review:'قيد المراجعة',rej:'مرفوض',no:'لم يُطلب النشر بعد',lock:'غير متاحة في باقتك'};
 return`<div class="ph"><h2>حالة النشر</h2></div>`+PUBS.map(([k,l])=>{const y=c.pub.includes(k),st=y?(P[k]||'no'):'lock',t=ST[st],LK=(P.links&&P.links[k])||(k=='web'?pubUrl():'');
 const act=!y?`<button class="btn" onclick="planUp()" style="background:var(--navy);color:#fff;box-shadow:none">ترقية الباقة</button>`:st=='no'?`<button class="btn" onclick="pubReq('${k}')" style="background:var(--navy);color:#fff;box-shadow:none">طلب النشر</button>`:st=='review'?`<button class="btn o" onclick="pubCancel('${k}')">إلغاء الطلب</button>`:(st=='ok'&&LK)?`<div style="width:100%"><small style="display:block;color:var(--mut);font-weight:700;margin-bottom:6px">${k=='web'?'رابط المدرسة':'رابط التطبيق'}</small><div id="pub_url_${k}" style="direction:ltr;text-align:right;font-size:15px;font-weight:700;line-height:1.6;color:var(--navy);overflow-wrap:anywhere;word-break:break-all;margin-bottom:2px;-webkit-user-select:text;user-select:text">${esc(LK)}</div><div style="display:flex;gap:8px;margin-top:8px"><button class="btn o" style="flex:1" onclick="pubCopy(this,'${k}')">نسخ الرابط</button><button class="btn" style="flex:1;background:var(--navy);color:#fff;box-shadow:none" onclick="pubView('${k}')">عرض</button></div></div>`:st=='rej'?`<button class="btn" onclick="pubReq('${k}')" style="background:var(--navy);color:#fff;box-shadow:none">إعادة الطلب</button>`:'';
-return`<div class="card" style="margin-top:14px"><div style="display:flex;align-items:center;gap:12px"><span style="width:44px;height:44px;border-radius:12px;background:var(--navy);display:flex;align-items:center;justify-content:center"><svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:none;stroke:#fff;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="${IC[k]}"/></svg></span><div style="flex:1"><b style="font-size:16px">${l}</b><small style="display:block;color:${t[1]};font-weight:700;margin-top:2px">${TX[st]}</small>${(k=='web'&&st=='review')?'<small style="display:block;color:var(--mut);font-weight:700;margin-top:4px">المدة المتوقعة للنشر: من 1 إلى 7 ساعات</small>':''}${((k=='play'||k=='ios')&&st=='review')?'<small style="display:block;color:var(--mut);font-weight:700;margin-top:4px">المدة المتوقعة للنشر: حتى 14 يومًا</small>':''}</div><svg viewBox="0 0 24 24" aria-label="${st}" style="width:30px;height:30px;fill:none;stroke:${t[1]};stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round"><path d="${t[0]}"/></svg></div>${act?`<div style="margin-top:12px;display:flex;justify-content:flex-end">${act}</div>`:''}</div>`}).join('')};
+return`<div class="card" style="margin-top:14px"><div style="display:flex;align-items:center;gap:12px"><span style="width:44px;height:44px;border-radius:12px;background:var(--navy);display:flex;align-items:center;justify-content:center"><svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:none;stroke:#fff;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="${IC[k]}"/></svg></span><div style="flex:1"><b style="font-size:16px">${l}</b><small style="display:block;color:${t[1]};font-weight:700;margin-top:2px">${TX[st]}</small></div><svg viewBox="0 0 24 24" aria-label="${st}" style="width:30px;height:30px;fill:none;stroke:${t[1]};stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round"><path d="${t[0]}"/></svg></div>${act?`<div style="margin-top:12px;display:flex;justify-content:flex-end">${act}</div>`:''}</div>`}).join('')};
 window.lgF={k:'',y:''};
 window.lgCsv=()=>{const rows=[['#','التاريخ','القسم','النوع','الطالب','المبلغ','المنفّذ','البيان','المصدر','بصمة']].concat(LG.all().map(e=>[e.n,e.t,e.k=='can'?'مقصف':'أقساط',e.y,e.nm||e.s,e.v,e.b,e.d,e.o=='adm'?'اللوحة':'التطبيق',e.h]));const s='\ufeff'+rows.map(r=>r.map(c=>'"'+String(c==null?'':c).replace(/"/g,'""')+'"').join(',')).join('\n');const l=document.createElement('a');l.href=URL.createObjectURL(new Blob([s],{type:'text/csv;charset=utf-8'}));l.download='iqra-ledger.csv';l.click()};
 V.ledger=()=>{
@@ -3118,8 +3202,8 @@ tcol=x=>TCL[Math.max(0,SUB.indexOf(x))%6],
 tst=t=>{const m=String(t).replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d)).match(/(\d{1,2})[:.](\d{2})/);return m?+m[1]*60+ +m[2]:99999},
 ttCls=()=>{const M=mine();let l=scope0('classes');if(M)l=l.filter(c=>M.some(x=>x.branch==c.branch&&x.grade==c.grade));return l},
 ttRows=c=>{db.slots=db.slots||{};if(!db.slots[c.id]){db.slots[c.id]=[...TDP];save()}return[...new Set([...db.slots[c.id],...db.schedule.filter(x=>x.cls==c.id).map(x=>x.time)])].sort((a,b)=>tst(a)-tst(b)||(a>b?1:-1))};
-function ttGrid(c,pr){const R=ttRows(c),ed=!pr&&acl('schedule')=='full';
-const cell=(d,t,di,ri)=>{const l=db.schedule.filter(x=>x.cls==c.id&&x.day==d&&x.time==t);return l.map(x=>`<div class="tc" style="--c:${tcol(x.subject)}"><b>${esc(x.subject)}</b>${x.teacher&&!pr?`<small>${esc(x.teacher)}</small>`:''}${ed?`<span class="tx"><button aria-label="تعديل" onclick="openForm('schedule','${x.id}')">✎</button><button class="d" aria-label="حذف" onclick="del('schedule','${x.id}')">✕</button></span>`:''}</div>`).join('')+(ed&&!l.length?`<button class="ta" aria-label="إضافة حصة" onclick="ttAdd('${c.id}',${di},${ri})">+</button>`:'')};
+function ttGrid(c,pr){const R=ttRows(c),ed=!pr&&acl('schedule')=='full',M=pr?{}:smtMap();
+const cell=(d,t,di,ri)=>{const l=db.schedule.filter(x=>x.cls==c.id&&x.day==d&&x.time==t);return l.map(x=>`<div class="tc${M[x.id]?' cf':''}" style="--c:${tcol(x.subject)}"><b>${esc(x.subject)}</b>${x.teacher&&!pr?`<small>${esc(x.teacher)}</small>`:''}${M[x.id]?`<small class="cfl">⚠ تعارض ${M[x.id]}</small>`:''}${ed?`<span class="tx"><button aria-label="تعديل" onclick="openForm('schedule','${x.id}')">✎</button><button class="d" aria-label="حذف" onclick="del('schedule','${x.id}')">✕</button></span>`:''}</div>`).join('')+(ed&&!l.length?`<button class="ta" aria-label="إضافة حصة" onclick="ttAdd('${c.id}',${di},${ri})">+</button>`:'')};
 return`<table class="ttb"><thead><tr><td>الوقت</td>${DAYS.map(d=>`<td>${d}</td>`).join('')}</tr></thead><tbody>${R.map((t,ri)=>`<tr><td class="tt">${esc(t)}${ed&&!db.schedule.some(x=>x.cls==c.id&&x.time==t)?`<button class="d" aria-label="حذف الفترة" onclick="ttDel('${c.id}',${ri})">✕</button>`:''}</td>${DAYS.map((d,di)=>`<td>${cell(d,t,di,ri)}</td>`).join('')}</tr>`).join('')}</tbody></table>`}
 function vTT(){const L=ttCls();if(!L.some(c=>c.id==TT.c))TT.c=(L[0]||{}).id||'';const c=L.find(x=>x.id==TT.c),ed=acl('schedule')=='full';
 return`<div class="ph"><h2>الجدول الدراسي</h2><span class="sp"></span><select onchange="TT.c=this.value;render()">${L.map(x=>`<option value="${x.id}" ${x.id==TT.c?'selected':''}>${esc(x.name)} — ${esc(bnm(x.branch))} (الصف ${esc(x.grade)}${shf(x)})</option>`).join('')}</select></div>
@@ -3133,12 +3217,74 @@ exWd=d=>{const t=new Date(d+'T00:00:00');return isNaN(t)?'':['الأحد','ال�
 exList=(cid,k)=>(db.exams||[]).filter(x=>x.cls==cid&&(x.kind||'امتحان')==EXK[k]).sort((a,b)=>String(a.date).localeCompare(String(b.date))||tst(a.time)-tst(b.time));
 function exTbl(c,k,pr){const L=exList(c.id,k),ed=!pr&&acl('exams')=='full',W=['16%','12%','15%','19%'];
 return L.length?`<style>.exq{table-layout:fixed!important;width:100%!important;min-width:0!important}.exq td{overflow-wrap:anywhere}@media(max-width:700px){.exq td{padding:6px 3px!important;font-size:11.5px!important}.tts h3{font-size:16px!important}}</style><table class="ttb exq"><thead><tr>${['التاريخ','اليوم','الوقت','المادة'].map((h,i)=>`<td style="width:${W[i]}">${h}</td>`).join('')}<td>${k=='ex'?'الامتحان':'التطبيق'}</td>${ed?'<td style="width:64px"></td>':''}</tr></thead><tbody>${L.map(x=>`<tr style="page-break-inside:avoid;break-inside:avoid"><td>${esc(x.date)}</td><td>${exWd(x.date)}</td><td>${esc(x.time||'—')}</td><td><b>${esc(x.subject)}</b></td><td style="text-align:right;white-space:normal;word-break:break-word"><b>${esc(x.title)}</b>${x.note?`<div style="font-size:12px;line-height:1.7;margin-top:4px;white-space:pre-wrap;text-align:right;font-weight:600;opacity:.88">${esc(x.note)}</div>`:''}</td>${ed?`<td class="tt" style="width:64px"><span class="tx" style="justify-content:center"><button aria-label="تعديل" onclick="openForm('exams','${x.id}')">✎</button><button class="d" aria-label="حذف" onclick="del('exams','${x.id}')">✕</button></span></td>`:''}</tr>`).join('')}</tbody></table>`:`<p class="em">لا يوجد جدول ${EXN[k]} لهذا الفصل بعد.</p>`}
-function modeBar(){return`<div class="ph">${[['wk','الحصص الأسبوعية'],['ex','جدول الامتحانات'],['ap','جدول التطبيقات']].map(([m,l])=>`<button class="btn ${TT.m==m?'g':'o'}" onclick="TT.m='${m}';render()">${l}</button>`).join('')}</div>`}
+function modeBar(){const n=smtVis().length;return`<div class="ph">${[['wk','الحصص الأسبوعية'],['ex','جدول الامتحانات'],['ap','جدول التطبيقات'],['cf','التعارضات']].map(([m,l])=>`<button class="btn ${TT.m==m?'g':'o'}" onclick="TT.m='${m}';render()">${l}${m=='cf'&&n?`<span class="cfn">${n}</span>`:''}</button>`).join('')}</div>`}
 function vEX(){const k=TT.m,L=ttCls();if(!L.some(c=>c.id==TT.c))TT.c=(L[0]||{}).id||'';const c=L.find(x=>x.id==TT.c),ed=acl('exams')=='full';
 return`<div class="ph"><h2>جدول ${EXN[k]}</h2><span class="sp"></span><select onchange="TT.c=this.value;render()">${L.map(x=>`<option value="${x.id}" ${x.id==TT.c?'selected':''}>${esc(x.name)} — ${esc(bnm(x.branch))} (الصف ${esc(x.grade)}${shf(x)})</option>`).join('')}</select></div>
 <div class="ph">${ed&&c?`<button class="btn g" onclick="exAdd('${c.id}','${k}')">+ إضافة ${EXK[k]}</button>`:''}<button class="btn o" onclick="exPrint(0)">🖨 طباعة / PDF</button><button class="btn o" onclick="exPrint(1)">طباعة كل الفصول</button></div>
 ${c?`<div class="card tw" style="padding:12px">${exTbl(c,k)}</div>`:'<div class="card"><p class="em">لا توجد فصول. أضف فصلاً من قسم «الفصول» أولاً.</p></div>'}`}
-V.schedule=()=>modeBar()+(TT.m=='wk'?_vSch():vEX());
+V.schedule=()=>modeBar()+(TT.m=='cf'?vCF():TT.m=='wk'?_vSch():vEX());
+/* ===== الجدول الذكي: كشف تعارض المعلمين والقاعات والفصول + حلول مقترحة ===== */
+const SMTN={t:'معلم',r:'قاعة',c:'فصل'};
+const smtD=s=>String(s==null?'':s).replace(/[٠-٩]/g,c=>'٠١٢٣٤٥٦٧٨٩'.indexOf(c));
+const smtR=t=>{const a=smtD(t).match(/\d{1,2}[:.]\d{2}/g)||[],p=x=>{const[h,i]=x.split(/[:.]/);return+h*60+ +i};return a.length>1?[p(a[0]),p(a[1])]:a.length?[p(a[0]),p(a[0])+1]:null};
+const smtO=(a,b)=>{const x=smtR(a),y=smtR(b);return x&&y?x[0]<y[1]&&y[0]<x[1]:String(a).trim()==String(b).trim()};
+const smtRm=x=>String(x.room||'').trim().toLowerCase();
+const smtBr=x=>x.branch||((db.classes.find(c=>c.id==x.cls)||{}).branch)||'';
+const smtCk=x=>x.cls||('b'+smtBr(x)+'g'+x.grade);
+function smtWhy(a,b){if(a.id==b.id||a.day!=b.day||!smtO(a.time,b.time))return[];const r=[];
+ if(a.teacher&&a.teacher==b.teacher)r.push('t');
+ if(smtRm(a)&&smtRm(a)==smtRm(b)&&(!smtBr(a)||!smtBr(b)||smtBr(a)==smtBr(b)))r.push('r');
+ if(smtCk(a)==smtCk(b))r.push('c');return r}
+let SMTK='',SMTV=[];
+function smtAll(){const k=db.schedule.map(x=>[x.id,x.day,x.time,x.teacher,x.room,x.cls,x.branch].join('~')).join('|');if(k==SMTK)return SMTV;
+ const by={},o=[];db.schedule.forEach(x=>(by[x.day]=by[x.day]||[]).push(x));
+ Object.keys(by).forEach(d=>{const L=by[d];for(let i=0;i<L.length;i++)for(let j=i+1;j<L.length;j++)smtWhy(L[i],L[j]).forEach(t=>o.push({t,a:L[i],b:L[j]}))});
+ SMTK=k;return SMTV=o}
+function smtMap(){const m={};smtAll().forEach(c=>[c.a,c.b].forEach(x=>{(m[x.id]=m[x.id]||[]);if(!m[x.id].includes(SMTN[c.t]))m[x.id].push(SMTN[c.t])}));Object.keys(m).forEach(k=>m[k]=m[k].join(' + '));return m}
+function smtVis(){const S=new Set(scope('schedule').map(x=>x.id));return smtAll().filter(c=>S.has(c.a.id)||S.has(c.b.id))}
+function smtTeach(d,n){return db.staff.filter(t=>t.name&&/معلم/.test(t.role)&&!db.schedule.some(x=>smtWhy(Object.assign({},d,{teacher:t.name}),x).includes('t'))).sort((a,b)=>(a.subject==d.subject?0:1)-(b.subject==d.subject?0:1)).slice(0,n).map(t=>t.name)}
+function smtRoomList(br){const z={};db.schedule.forEach(x=>{const r=String(x.room||'').trim();if(r&&(!smtBr(x)||!br||smtBr(x)==br))z[r]=1});return Object.keys(z)}
+function smtRooms(d,n){return smtRoomList(smtBr(d)).filter(r=>!db.schedule.some(x=>smtWhy(Object.assign({},d,{room:r}),x).includes('r'))).slice(0,n)}
+function smtSlots(d,n){const c=db.classes.find(x=>x.id==d.cls);if(!c)return[];const o=[];
+ ttRows(c).forEach(t=>DAYS.forEach(dy=>{if(dy==d.day&&t==d.time)return;const e=Object.assign({},d,{day:dy,time:t});if(!db.schedule.some(x=>smtWhy(e,x).length))o.push([dy,t])}));
+ o.sort((a,b)=>(a[0]==d.day?0:1)-(b[0]==d.day?0:1));return o.slice(0,n)}
+function smtFix(id,f,v){const x=db.schedule.find(r=>r.id==id);if(!x||!confirm('تطبيق هذا الحل على الحصة؟'))return;
+ if(f=='slot'){const[d,t]=v.split('|');x.day=d;x.time=t}else x[f]=v;
+ lg('تعديل','الجدول الدراسي',(x.subject||'')+' (حل تعارض)',smtBr(x));save();render()}
+function vCF(){const ed=acl('schedule')=='full',all=smtVis(),F=TT.f||'',L=F?all.filter(c=>c.t==F):all,nC=x=>((db.classes.find(c=>c.id==x.cls)||{}).name||x.grade||'—'),n=t=>all.filter(c=>c.t==t).length,
+ chips=[['','الكل',all.length],['t','معلمون',n('t')],['r','قاعات',n('r')],['c','فصول',n('c')]].map(([k,l,c])=>`<button class="btn ${F==k?'g':'o'}" onclick="TT.f='${k}';render()">${l} (${c})</button>`).join(''),
+ ent=x=>`<div class="cfe"><span><b>${esc(nC(x))}</b> — ${esc(x.subject||'')} · ${esc(x.teacher||'بدون معلم')} · قاعة ${esc(x.room||'—')}</span>${ed?`<button class="btn o" onclick="openForm('schedule','${x.id}')">تعديل</button>`:''}</div>`,
+ fix=c=>{if(!ed)return'';const d=c.b,o=[];
+  if(c.t=='t')smtTeach(d,3).forEach(v=>o.push(['teacher',v,'معلم بديل: '+v]));
+  if(c.t=='r')smtRooms(d,3).forEach(v=>o.push(['room',v,'قاعة بديلة: '+v]));
+  smtSlots(d,3).forEach(([dy,t])=>o.push(['slot',dy+'|'+t,'نقل إلى '+dy+' '+t]));
+  return `<div class="smg"><span>${o.length?'حلول للحصة الثانية:':'لا توجد بدائل تلقائية، عدّل الحصة يدوياً.'}</span>${o.map(([f,v,t])=>`<button class="smc" data-v="${esc(v)}" onclick="smtFix('${d.id}','${f}',this.dataset.v)">${esc(t)}</button>`).join('')}</div>`};
+ return `<div class="ph"><h2>تعارضات الجدول</h2></div><div class="ph">${chips}</div>`+(L.length?L.map(c=>`<div class="card cfc"><div class="cfh"><span class="cft">تعارض ${SMTN[c.t]}</span><b>${esc(c.a.day)} — ${esc(c.a.time)}</b>${c.a.time!=c.b.time?`<small>و ${esc(c.b.time)}</small>`:''}</div>${ent(c.a)}${ent(c.b)}${fix(c)}</div>`).join(''):`<div class="card"><p class="em">✓ لا توجد تعارضات في المعلمين والقاعات والفصول.</p></div>`)}
+/* مساعد النموذج: يكشف التعارض لحظياً ويقترح معلمين وقاعات وأوقاتاً متاحة */
+const smtOF=openForm;openForm=function(k,id){const pf=PF&&PF.k==k?PF.r:null;smtOF(k,id);if(k=='schedule'){try{smtAssist(id,pf)}catch(e){}}};
+function smtAssist(id,pf){const fm=$('#fm');if(!fm)return;const rec=id?(db.schedule.find(x=>x.id==id)||{}):(pf||{}),box=document.createElement('div');fm.querySelector('.rw').before(box);
+ const g=n=>{const e=fm.querySelector('[name='+n+']');return e?e.value:''},
+ cur=()=>{const cls=rec.cls||g('cls'),c=db.classes.find(x=>x.id==cls);return{id:id||'',cls,day:g('day'),time:g('time'),teacher:g('teacher'),room:g('room').trim(),subject:g('subject'),branch:c?c.branch:g('branch'),grade:c?c.grade:g('grade')}},
+ rm=fm.querySelector('[name=room]'),chip=(f,v,t)=>`<button type="button" class="smc" data-f="${f}" data-v="${esc(v)}">${esc(t||v)}</button>`;
+ if(rm){const dl=document.createElement('datalist');dl.id='smtRL';dl.innerHTML=smtRoomList(cur().branch).map(r=>`<option value="${esc(r)}">`).join('');rm.setAttribute('list','smtRL');rm.after(dl)}
+ const nC=x=>((db.classes.find(c=>c.id==x.cls)||{}).name||x.grade||''),
+ run=()=>{const d=cur();if(!d.day||!d.time){box.className='';box.innerHTML='';return}
+  const hit=[];db.schedule.forEach(x=>smtWhy(d,x).forEach(t=>hit.push([t,x])));
+  const m=hit.map(([t,x])=>t=='t'?`المعلم ${esc(d.teacher)} لديه حصة (${esc(nC(x))} — ${esc(x.subject||'')}) ${esc(x.time)}`:t=='r'?`القاعة ${esc(d.room)} مشغولة بحصة (${esc(nC(x))} — ${esc(x.subject||'')}) ${esc(x.time)}`:`لهذا الفصل حصة أخرى (${esc(x.subject||'')}) ${esc(x.time)}`);
+  let h=hit.length?`<b>⚠ تعارض — لن يُحفظ حتى يُحل</b><br>${m.join('<br>')}`:'✓ لا يوجد تعارض في هذا اليوم والوقت';
+  const T=!d.teacher||hit.some(a=>a[0]=='t')?smtTeach(d,5):[],R=!d.room||hit.some(a=>a[0]=='r')?smtRooms(d,5):[],S=hit.length?smtSlots(d,4):[];
+  if(T.length)h+=`<div class="smg"><span>معلمون متاحون:</span>${T.map(v=>chip('teacher',v)).join('')}</div>`;
+  if(R.length)h+=`<div class="smg"><span>قاعات متاحة:</span>${R.map(v=>chip('room',v)).join('')}</div>`;
+  if(S.length)h+=`<div class="smg"><span>أوقات متاحة للفصل:</span>${S.map(([dy,t])=>chip('slot',dy+'|'+t,dy+' '+t)).join('')}</div>`;
+  box.className='smt '+(hit.length?'bad':'ok');box.innerHTML=h};
+ box.onclick=e=>{const b=e.target.closest('.smc');if(!b)return;const f=b.dataset.f,v=b.dataset.v;
+  if(f=='slot'){const[dy,t]=v.split('|'),sd=fm.querySelector('[name=day]'),q=smtD(t).match(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/);if(sd)sd.value=dy;
+   if(q)['sh','sm','eh','em'].forEach((n,i)=>{const x=fm.querySelector('[data-t='+n+']');if(x){x.value=String(q[i+1]).padStart(2,'0');x.dispatchEvent(new Event('input',{bubbles:true}))}});
+   else{const hh=fm.querySelector('[name=time]');if(hh)hh.value=t}}
+  else{const x=fm.querySelector('[name='+f+']');if(x)x.value=v}
+  run()};
+ fm.addEventListener('input',run);fm.addEventListener('change',run);run()}
+
 function exAdd(cid,k){PF={k:'exams',r:{cls:cid,kind:EXK[k]}};openForm('exams');PF=null}
 function exSheet(c,k){return`<section class="dps tts"><h3>${esc(db.set.school)} — جدول ${EXN[k]}</h3><p><b>${esc(c.name)}</b> — الصف ${esc(c.grade)}${shf(c)} — ${esc(bnm(c.branch))}<br><small>${esc(db.set.year)} / ${esc(db.set.term)}</small></p>${exTbl(c,k,1)}</section>`}
 function exPrint(all){const k=TT.m,L=ttCls(),S=all?L:L.filter(c=>c.id==TT.c);if(!S.length){alert('لا توجد فصول للطباعة');return}
@@ -4898,6 +5044,22 @@ V.grades=function(){
 render();
 })();
 
+
+/* ===== لوحة الإدارة: حركات الدخول والخروج لليوم المحدد (حسب البوابة) ===== */
+(function(){
+const VA9=V.att;
+V.att=function(){const h=VA9.apply(this,arguments);let c='';
+ try{
+  const d=ATT.d,S=attSt();let ls={};try{ls=(JSON.parse(localStorage.getItem('att')||'{}')||{})[d]||{}}catch(e){}
+  const mvA=db.attMv||{},rows=S.map(s=>({s,m:((ls[s.id]||ls['a_'+s.id]||{}).mv)||mvA[d+'|'+s.id]||[]})).filter(x=>x.m.length);
+  if(rows.length){const gc={};rows.forEach(x=>x.m.forEach(y=>{const g=y.g||'بدون بوابة';gc[g]=gc[g]||{i:0,o:0};gc[g][y.t=='in'?'i':'o']++}));
+   c='<div class="card" style="margin-top:14px"><h3 style="margin:0 0 6px">حركات الدخول والخروج — '+esc(d)+'</h3><div style="color:var(--mut);font-size:13px;margin-bottom:8px">'
+    +Object.keys(gc).map(g=>esc(g)+': دخول '+gc[g].i+' · خروج '+gc[g].o).join(' &nbsp;|&nbsp; ')+'</div>'
+    +rows.map(x=>'<div style="padding:10px 0;border-top:1px solid var(--line)"><b>'+esc(x.s.name)+'</b><div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px">'
+     +x.m.map(y=>'<span style="font-size:12px;padding:3px 10px;border-radius:99px;border:1px solid var(--line)">'+(y.t=='in'?'دخول ':'خروج ')+esc(y.tm)+(y.g?' · '+esc(y.g):'')+(y.r?' · '+esc(y.r):'')+'</span>').join('')+'</div></div>').join('')+'</div>'}
+ }catch(e){}
+ return h+c};
+})();
 /* ===== طباعة سجل الحضور والغياب (من تاريخ إلى تاريخ) ===== */
 (function(){
 const N={p:'حاضر',a:'غائب',l:'متأخر'},COLR={p:'#0a7a45',a:'#c4262e',l:'#a87b00'};
@@ -7055,7 +7217,8 @@ window.chkPk=()=>{const i=document.getElementById('pkv'),v=(i&&i.value||'').toUp
  if(!r){o.innerHTML='<b style="color:var(--red)">الرمز غير موجود</b>';return}
  if(r.st=='مستخدم'){o.innerHTML=`<b style="color:var(--red)">✗ الرمز مستخدم مسبقاً</b><br>الطالب: ${esc(sn(r.student))} · ${esc(r.type||'')}<br>سُجّل الاستلام بواسطة: ${esc(r.uby||'—')}${r.uid?' · هوية: '+esc(r.uid):''}${r.uat?' · '+esc(new Date(r.uat).toLocaleString('en-GB',{hour12:false}).slice(0,17)):''}`;return}
  const ok=r.st=='مقبول'&&r.date==today;o.innerHTML=`<b style="color:${ok?'var(--green)':'var(--red)'}">${ok?'✓ رمز صالح لليوم':r.st!='مقبول'?'✗ الطلب '+esc(r.st||'قيد المراجعة'):'✗ تاريخ الطلب '+esc(r.date)+' (ليس اليوم)'}</b><br>الطالب: ${esc(sn(r.student))} · ${esc(r.type||'')} · ${esc(r.time||'')}<br>المستلم: ${esc(r.who||'ولي الأمر')} ${esc(r.phone||'')}${r.uid?' · هوية: '+esc(r.uid):''}`+(ok?`<div style="margin-top:10px"><button class="btn g" onclick="pkUse('${r.id}')">تسجيل الاستلام (مستخدم)</button></div>`:'')};
-{const V0=V.pickup;V.pickup=()=>`<div class="card"><h3>التحقق من رمز استلام</h3><div class="rw" style="gap:10px;align-items:stretch"><input id="pkv" placeholder="PK-XXXXXX" style="direction:ltr;flex:1;min-width:0"><button class="btn" style="background:#2f3a49;color:#fff;box-shadow:none;margin:0" onclick="chkPk()">تحقق</button></div><div id="pkr" style="margin-top:8px"></div></div>`+V0()}
+window.pkNfc=async()=>{const i=document.getElementById('pkv'),o=document.getElementById('pkr');try{const r=new NDEFReader();await r.scan();if(o)o.innerHTML='<small style="color:var(--mut)">قرّب البطاقة من ظهر الجهاز…</small>';r.onreading=e=>{let v='';try{for(const c of e.message.records){if(c.recordType=='text'||c.recordType=='url'){v=new TextDecoder(c.encoding||'utf-8').decode(c.data);break}}}catch(x){}if(!v)v=e.serialNumber||'';if(i){i.value=String(v).trim();chkPk()}};r.onreadingerror=()=>{if(o)o.innerHTML='<small style="color:var(--red)">تعذّرت قراءة البطاقة، أعد المحاولة</small>'}}catch(x){if(o)o.innerHTML='<small style="color:var(--red)">تعذّر تشغيل NFC — فعّله في إعدادات الجهاز وامنح الإذن</small>'}};
+{const V0=V.pickup;V.pickup=()=>{try{setTimeout(()=>{const i=document.getElementById('pkv');if(i&&window.matchMedia&&matchMedia('(pointer:fine)').matches)i.focus()},150)}catch(x){}return `<div class="card"><h3>التحقق من رمز استلام</h3><div style="display:flex;gap:10px;align-items:stretch;width:100%;margin-top:12px"><input id="pkv" placeholder="PK-XXXXXX أو قرّب البطاقة من القارئ" autocomplete="off" autocapitalize="characters" onkeydown="if(event.key=='Enter'){event.preventDefault();chkPk()}" style="direction:ltr;flex:1 1 auto;width:auto;min-width:0;margin:0;box-sizing:border-box">${'NDEFReader' in window?'<button class="btn o" style="margin:0;flex:0 0 auto;padding:0 14px" onclick="pkNfc()">NFC</button>':''}<button class="btn" style="background:#2f3a49;color:#fff;box-shadow:none;margin:0;flex:0 0 auto;padding:0 22px" onclick="chkPk()">تحقق</button></div><div id="pkr" style="margin-top:8px"></div></div>`+V0()}}
 {const X0=E.pickup.x;E.pickup.x=r=>X0(r)+`<button onclick="pkQR('${r.id}')">الرمز QR</button>`}
 window.pkQR=id=>{const r=db.pickup.find(x=>x.id==id);if(!r)return;
  if(!r.code){const A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let c;do{c='PK-';for(let i=0;i<6;i++)c+=A[Math.floor(Math.random()*A.length)]}while(db.pickup.some(x=>x.code==c));r.code=c;save()}
@@ -7077,95 +7240,128 @@ window.pkUseOk=id=>{const r=db.pickup.find(x=>x.id==id);if(!r)return;if(r.st=='�
  const idn=String((document.getElementById('pkd')||{}).value||'').replace(/[٠-٩]/g,c=>c.charCodeAt(0)-1632).replace(/[۰-۹]/g,c=>c.charCodeAt(0)-1776).trim();if(!idn){alert('اكتب رقم هوية المستلم');return}
  r.st='مستخدم';r.uby=n;r.uid=idn;r.uat=Date.now();r.dt=Date.now();lg('تعديل',E.pickup.t,'استخدام رمز: '+sn(r.student)+' ← '+n,r.branch);save();closeM();render();
  const o=document.getElementById('pkr');if(o)o.innerHTML='<b style="color:var(--green)">✓ تم تسجيل الاستلام — الرمز الآن مستخدم</b>'};
+{const PU=window.pkUseOk;window.pkUseOk=id=>{PU(id);try{const r=db.pickup.find(x=>x.id==id);if(r&&r.st=='مستخدم'&&!r.ubb){r.ubb=(me()&&me().name)||'';save()}}catch(e){}}}
+/* ===== التفويض: مفوَّضون دائمون باستلام الطالب (رمز TF + سجل تسليم) ===== */
+const TFREL=['أب','أم','أخ','أخت','عم','خال','جد','جدة','سائق','أخرى'];
+const ld=t=>{const d=new Date(t);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+const fxd=v=>String(v==null?'':v).replace(/[٠-٩]/g,c=>c.charCodeAt(0)-1632).replace(/[۰-۹]/g,c=>c.charCodeAt(0)-1776).trim();
+mk('tafweed','المفوَّضون بالاستلام','مفوَّض',
+ [['name','المفوَّض'],['rel','الصلة'],['phone','الهاتف'],['uid','الهوية',r=>r.uid?'<span dir="ltr">'+esc(r.uid)+'</span>':'—'],['until','ساري حتى',r=>!r.until?'بدون انتهاء':(r.until<today?tg(r.until+' · منتهي','var(--red)'):esc(r.until))],['code','الرمز',r=>r.code?'<span dir="ltr">'+esc(r.code)+'</span>':'—']],
+ [['name','اسم المفوَّض','text'],['rel','صلة القرابة','select',TFREL],['phone','هاتف المفوَّض','tel'],['uid','رقم هوية المفوَّض','text'],['until','ساري حتى (اختياري)','date',null,1],['code','الرمز (يُولَّد تلقائياً إن تُرك فارغاً)','text',null,1],['note','ملاحظات','textarea',null,1]],'vTf');
+I.tafweed='M12 3l8 3v5c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6zM9 12l2 2 4-4';
+try{const f=E.tafweed.f.find(x=>x[0]=='st');if(f)f[3]=['مقبول','قيد المراجعة','موقوف','مرفوض'];
+ const c=E.tafweed.cols,i=c.findIndex(x=>x[0]=='st');c[i]=['st','الحالة',r=>tg(r.st||'قيد المراجعة',r.st=='مقبول'?'var(--green)':r.st=='مرفوض'?'var(--red)':r.st=='موقوف'?'#6b7480':'var(--gold)')]}catch(e){}
+{const AT=allow;allow=function(k,d){if(k=='tafweed'){
+  d.uid=fxd(d.uid);
+  if(!d.code){const A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let c;do{c='TF-';for(let i=0;i<6;i++)c+=A[Math.floor(Math.random()*A.length)]}while(db.tafweed.some(x=>x.code==c));d.code=c}
+  else{d.code=String(d.code).trim().toUpperCase();if(!/^TF-[A-Z0-9]{4,10}$/.test(d.code)){ALM='صيغة الرمز: TF-XXXXXX';return false}}
+  if(db.tafweed.some(x=>x.code==d.code&&x.id!=d.id)){ALM='هذا الرمز مستخدم لمفوَّض آخر';return false}
+  if(d.uid&&db.tafweed.some(x=>x.id!=d.id&&String(x.student)==String(d.student)&&String(x.uid||'')==d.uid&&x.st!='مرفوض')){ALM='هذا المفوَّض مسجّل مسبقاً لنفس الطالب';return false}
+ }return AT(k,d)}}
+{const XT=E.tafweed.x;E.tafweed.x=r=>XT(r)+(r.st=='مقبول'?`<button class="d" onclick="setReq('tafweed','${r.id}','موقوف')">إيقاف</button>`:r.st=='موقوف'?`<button onclick="setReq('tafweed','${r.id}','مقبول')">تفعيل</button>`:'')+(r.code?`<button onclick="tfCard('${r.id}')">بطاقة QR</button>`:'')}
+window.tfCard=id=>{const r=db.tafweed.find(x=>x.id==id);if(!r||!r.code)return;
+ mdl(`<div class="bx" style="text-align:center"><h3>بطاقة تفويض بالاستلام</h3><div style="width:210px;margin:8px auto;border:1px solid var(--line);border-radius:12px;overflow:hidden">${window.__QR('IQRA-TF:'+r.code)}</div><b style="display:block;direction:ltr;letter-spacing:3px;font-size:20px">${esc(r.code)}</b><p style="margin:8px 0">المفوَّض: <b>${esc(r.name||'')}</b> (${esc(r.rel||'')})<br>الطالب: ${esc(sn(r.student))}<br>الهوية: <span dir="ltr">${esc(r.uid||'—')}</span><br>ساري حتى: ${esc(r.until||'بدون انتهاء')}<br>الحالة: ${esc(r.st||'قيد المراجعة')}</p><div class="rw"><button class="btn o" onclick="window.print()">طباعة</button><button class="btn o" onclick="closeM()">إغلاق</button></div></div>`)};
+/* التحقق من رمز TF من نفس خانة التحقق في صفحة الاستلام */
+{const C0=window.chkPk;window.chkPk=()=>{const i=document.getElementById('pkv'),v=(i&&i.value||'').toUpperCase().replace(/^IQRA-(PK|TF):/,'').trim();
+ if(!/^TF-/.test(v))return C0();
+ if(i)i.value=v;const o=document.getElementById('pkr');if(!o)return;
+ const r=db.tafweed.find(x=>String(x.code||'').toUpperCase()==v);
+ if(!r){o.innerHTML='<b style="color:var(--red)">الرمز غير موجود</b>';return}
+ const exp=!!(r.until&&r.until<today),ok=r.st=='مقبول'&&!exp;
+ const done=(db.tfLog||[]).filter(x=>String(x.student)==String(r.student)&&x.date==today).map(x=>({who:x.who,time:x.time||''}))
+  .concat((db.pickup||[]).filter(p=>String(p.student)==String(r.student)&&p.st=='مستخدم'&&p.uat&&ld(p.uat)==today).map(p=>({who:p.uby,time:new Date(p.uat).toTimeString().slice(0,5)})));
+ let h=`<b style="color:${ok?'var(--green)':'var(--red)'}">${ok?'✓ تفويض ساري':r.st!='مقبول'?'✗ التفويض '+esc(r.st||'قيد المراجعة'):'✗ التفويض منتهي ('+esc(r.until)+')'}</b><br>الطالب: ${esc(sn(r.student))}<br>المفوَّض: <b>${esc(r.name||'')}</b> (${esc(r.rel||'')}) ${esc(r.phone||'')}<br>الهوية: <b dir="ltr">${esc(r.uid||'—')}</b> — طابقها مع هوية الشخص الحاضر`;
+ if(done.length)h+=`<div style="margin-top:8px;color:var(--red)"><b>⚠ سُلّم هذا الطالب اليوم مسبقاً</b> إلى ${esc(done[0].who||'—')} ${esc(done[0].time)}</div>`;
+ if(ok)h+=`<div style="margin-top:10px"><button class="btn g" onclick="tfUse('${r.id}')">تسجيل التسليم</button></div>`;
+ o.innerHTML=h}}
+window.tfUse=id=>{const r=db.tafweed.find(x=>x.id==id);if(!r)return;
+ if(r.st!='مقبول'||(r.until&&r.until<today)){alert('التفويض غير ساري');return}
+ mdl(`<div class="bx"><h3>تسجيل تسليم الطالب</h3><p style="margin:6px 0">${esc(sn(r.student))}<br>المفوَّض: ${esc(r.name||'')} (${esc(r.rel||'')})<br>الرمز: <b dir="ltr" style="display:inline-block">${esc(r.code)}</b></p><label>رقم هوية الشخص الحاضر</label><input id="tfd" inputmode="numeric" dir="ltr" style="text-align:right" placeholder="اكتب رقم الهوية المعروضة"><p style="margin:6px 0;color:var(--mut);font-size:13px">يجب أن يطابق رقم الهوية المسجّل للمفوَّض، وإلا لا يُسلَّم الطالب.</p><div class="rw"><button class="btn g" onclick="tfUseOk('${r.id}')">تأكيد التسليم</button><button class="btn o" onclick="closeM()">إلغاء</button></div></div>`)};
+window.tfUseOk=id=>{const r=db.tafweed.find(x=>x.id==id);if(!r)return;
+ if(r.st!='مقبول'||(r.until&&r.until<today)){alert('التفويض غير ساري');return}
+ const idn=fxd((document.getElementById('tfd')||{}).value);if(!idn){alert('اكتب رقم الهوية');return}
+ if(r.uid&&idn!=fxd(r.uid)){alert('رقم الهوية لا يطابق المسجّل — لا تُسلّم الطالب');return}
+ const n=new Date(),time=String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0');
+ db.tfLog=db.tfLog||[];db.tfLog.unshift({id:'tl'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),tf:r.id,student:r.student,who:r.name||'',rel:r.rel||'',uid:idn,date:today,time:time,ts:Date.now(),by:(me()&&me().name)||'—',branch:r.branch||''});db.tfLog=db.tfLog.slice(0,3000);
+ lg('تعديل','المفوَّضون بالاستلام','تسليم: '+sn(r.student)+' ← '+(r.name||''),r.branch);save();closeM();render();
+ const o=document.getElementById('pkr');if(o)o.innerHTML='<b style="color:var(--green)">✓ تم تسجيل التسليم</b>'};
+{const VP=V.pickup;V.pickup=()=>VP().replace('PK-XXXXXX أو قرّب','PK-XXXXXX / TF-XXXXXX أو قرّب')}
+{const VT=V.tafweed;V.tafweed=()=>{const L=(db.tfLog||[]).concat((db.pickup||[]).filter(p=>p.st=='مستخدم'&&p.uat).map(p=>({date:ld(p.uat),time:new Date(p.uat).toTimeString().slice(0,5),student:p.student,who:p.uby||p.who||'',rel:p.type||'إذن خروج/استلام',uid:p.uid||'',by:p.ubb||'—',branch:p.branch,ts:p.uat}))).filter(x=>cur=='all'||!x.branch||x.branch==cur).sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0,30);
+ return `<div class="card"><p style="margin:0">للتحقق من رمز TF أو مسح بطاقة المفوَّض استخدم خانة التحقق في صفحة <a href="#" onclick="go('pickup');return false">طلبات خروج واستلام الطلاب</a>.</p></div>`+VT()+
+ `<div class="ph" style="margin-top:18px"><h2>سجل التسليم</h2><span class="cnt">${L.length}</span></div><div class="card tw"><table><thead><tr><th>التاريخ</th><th>الوقت</th><th>الطالب</th><th>المسلَّم إليه</th><th>الصلة</th><th>الهوية</th><th>سجّل بواسطة</th></tr></thead><tbody>${L.map(x=>`<tr><td>${esc(x.date)}</td><td>${esc(x.time||'')}</td><td>${esc(sn(x.student))}</td><td>${esc(x.who)}</td><td>${esc(x.rel)}</td><td dir="ltr">${esc(x.uid)}</td><td>${esc(x.by)}</td></tr>`).join('')||'<tr><td colspan="7" class="em">لا توجد عمليات تسليم</td></tr>'}</tbody></table></div>`}}
+
+/* ===== ربط التسليم بحركات الدخول والخروج + تحذيرات البوابة (تسليم مكرر / لم يدخل / خرج مسبقاً) ===== */
+{const hm=()=>{const n=new Date();return String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0')};
+ const gv=i=>{const e=document.getElementById(i);return e?String(e.value||''):''};
+ const lsAtt=()=>{try{return JSON.parse(localStorage.getItem('att')||'{}')||{}}catch(e){return{}}};
+ const gateNm=()=>{try{const g=JSON.parse(localStorage.getItem('gates')||'null'),c=JSON.parse(localStorage.getItem('agate')||'""');if(Array.isArray(g)&&g.length)return g.includes(c)?c:g[0]}catch(e){}return 'البوابة الرئيسية'};
+ /* حالة الطالب اليوم: in / out / none */
+ const pkSt=sid=>{const k=today+'|'+sid,ls=lsAtt()[today]||{},lr=ls[sid]||ls['a_'+sid]||null;
+  let m=(lr&&Array.isArray(lr.mv)&&lr.mv.length)?lr.mv:((db.attMv||{})[k]||[]);
+  if(!m.length&&lr){m=[];if(lr.in)m.push({t:'in',tm:lr.in});if(lr.out)m.push({t:'out',tm:lr.out})}
+  if(m.length){const l=m[m.length-1];return{s:l.t,tm:l.tm||'',m:m}}
+  const a=(lr&&lr.s)||db.att[k];return{s:(a=='p'||a=='l')?'in':'none',tm:'',m:[]}};
+ const doneToday=sid=>(db.tfLog||[]).filter(x=>String(x.student)==String(sid)&&x.date==today).map(x=>({who:x.who,time:x.time||''}))
+  .concat((db.pickup||[]).filter(p=>String(p.student)==String(sid)&&p.st=='مستخدم'&&p.uat&&ld(p.uat)==today).map(p=>({who:p.uby,time:new Date(p.uat).toTimeString().slice(0,5)})));
+ /* قائمة التحذيرات قبل التسليم */
+ const pkWarns=sid=>{const w=[],st=pkSt(sid),d=doneToday(sid);
+  if(d.length)w.push('سُلّم هذا الطالب اليوم مسبقاً إلى <b>'+esc(d[0].who||'—')+'</b>'+(d[0].time?' الساعة '+esc(d[0].time):'')+(d.length>1?' (و'+(d.length-1)+' تسليم آخر)':''));
+  if(st.s=='none')w.push('لم يُسجَّل دخول الطالب إلى المدرسة اليوم');
+  else if(st.s=='out'&&!d.length)w.push('الطالب مسجَّل خروجه'+(st.tm?' الساعة '+esc(st.tm):'')+' ولم يُسجَّل عودته');
+  return w};
+ /* تسجيل حركة «خروج» تلقائياً عند التسليم */
+ const pkMove=(sid,who,ovr)=>{try{
+  const tm=hm(),g=gateNm(),e={t:'out',tm:tm,g:g,r:'تسليم إلى '+(who||'—')+(ovr?' (استثناء: '+ovr+')':'')};
+  const k=today+'|'+sid,st=pkSt(sid),mv=st.m.slice();mv.push(e);
+  db.attMv=db.attMv||{};db.attMv[k]=mv;if(!db.att[k]||db.att[k]=='a')db.att[k]='p';
+  const A=lsAtt();A[today]=A[today]||{};const key=A[today][sid]?sid:(A[today]['a_'+sid]?'a_'+sid:'a_'+sid);
+  const r=Object.assign({},A[today][key]||{});r.mv=mv.slice();const f=r.mv.find(x=>x.t=='in');if(f)r.in=f.tm;r.out=tm;
+  if(!r.s||r.s=='a'){r.s='p';r.auto=1}
+  A[today][key]=r;localStorage.setItem('att',JSON.stringify(A));
+  save()}catch(x){}};
+ /* نافذة التحذير: تتطلب كتابة سبب للمتابعة */
+ const pkWarnUI=(kind,id,w,keep)=>{
+  mdl(`<div class="bx"><h3 style="color:var(--red)">⚠ تنبيه قبل التسليم</h3><ul style="margin:8px 18px;line-height:1.9">${w.map(x=>'<li>'+x+'</li>').join('')}</ul><label>سبب المتابعة (إلزامي)</label><input id="pkov" placeholder="مثال: أذن المدير / خطأ في تسجيل الدخول">${Object.keys(keep).map(k=>`<input type="hidden" id="${k}" value="${esc(keep[k])}">`).join('')}<div class="rw" style="margin-top:12px"><button class="btn g" onclick="pkWarnGo('${kind}','${id}')">متابعة التسليم رغم التحذير</button><button class="btn o" onclick="closeM()">إلغاء — عدم التسليم</button></div></div>`)};
+ window.pkWarnGo=(kind,id)=>{const v=gv('pkov').trim();if(v.length<3){alert('اكتب سبب المتابعة (3 أحرف على الأقل)');return}
+  if(kind=='tf')window.tfUseOk(id,v);else window.pkUseOk(id,v)};
+ /* تسليم المفوَّض (TF) */
+ {const TU=window.tfUseOk;window.tfUseOk=function(id,ov){const r=db.tafweed.find(x=>x.id==id);if(!r)return TU(id);
+  if(ov===undefined){
+   if(r.st!='مقبول'||(r.until&&r.until<today))return TU(id);
+   const idn=fxd(gv('tfd'));if(!idn||(r.uid&&idn!=fxd(r.uid)))return TU(id);
+   const w=pkWarns(r.student);if(w.length){pkWarnUI('tf',id,w,{tfd:gv('tfd')});return}}
+  const n0=(db.tfLog||[]).length;TU(id);
+  if((db.tfLog||[]).length>n0){const l=db.tfLog[0];if(ov){l.ovr=ov;lg('تعديل','المفوَّضون بالاستلام','تسليم باستثناء: '+sn(r.student)+' — '+ov,r.branch)}
+   pkMove(r.student,r.name||'',ov||'');try{render()}catch(e){}}}}
+ /* تسليم بإذن خروج/استلام (PK) */
+ {const PU2=window.pkUseOk;window.pkUseOk=function(id,ov){const r=db.pickup.find(x=>x.id==id);if(!r)return PU2(id);
+  if(r.st=='مستخدم')return PU2(id);
+  if(ov===undefined){
+   const n=gv('pku').trim(),idn=gv('pkd').trim();if(!n||!idn)return PU2(id);
+   const w=pkWarns(r.student);if(w.length){pkWarnUI('pk',id,w,{pku:gv('pku'),pkd:gv('pkd')});return}}
+  PU2(id);
+  if(r.st=='مستخدم'){if(ov){r.ovr=ov;lg('تعديل',E.pickup.t,'تسليم باستثناء: '+sn(r.student)+' — '+ov,r.branch)}
+   pkMove(r.student,r.uby||r.who||'',ov||'');try{render()}catch(e){}}}}
+ /* تنبيه مبكر في خانة التحقق (قبل الضغط على تسجيل) */
+ {const C1=window.chkPk;window.chkPk=function(){C1.apply(this,arguments);try{const o=document.getElementById('pkr');if(!o||!/تسجيل (التسليم|الاستلام)/.test(o.innerHTML))return;
+  const v=gv('pkv').toUpperCase().replace(/^IQRA-(PK|TF):/,'').trim(),r=/^TF-/.test(v)?db.tafweed.find(x=>String(x.code||'').toUpperCase()==v):db.pickup.find(x=>String(x.code||'').toUpperCase()==v);
+  if(!r)return;const w=pkWarns(r.student).filter(x=>!/سُلّم هذا الطالب اليوم/.test(x));
+  if(w.length)o.innerHTML+='<div style="margin-top:8px;color:var(--red)">'+w.map(x=>'<b>⚠ </b>'+x).join('<br>')+'</div>'}catch(e){}}}
+}
+
+/* ===== دور «موظف البوابة»: يرى الاستلام والتفويض (عرض فقط) ويتحقق ويسجّل التسليم ===== */
+{const GRL='موظف البوابة';
+ if(!ROLES.includes(GRL)){const i=ROLES.indexOf('مشرف فصل');ROLES.splice(i>-1?i:ROLES.length,0,GRL)}
+ const gF=()=>{let c=0;db.perms=db.perms||{};if(!db.perms[GRL]){db.perms[GRL]=[];c=1}
+  (db.users||[]).forEach(u=>{if(u.role==GRL&&!u.gt){u.gt=1;u.pm=Object.assign({},u.pm,{pickup:'view',tafweed:'view'});u.np=1;c=1}});if(c)save()};
+ const RG=render;render=function(){try{gF()}catch(e){}return RG.apply(this,arguments)};try{gF()}catch(e){}}
+/* إيقاف التفويض من الإدارة يُسجَّل كإيقاف إداري (لا يستطيع الولي إعادة تفعيله) */
+{const SR=window.setReq;window.setReq=(k,id,st)=>{if(k=='tafweed'){const r=db.tafweed.find(x=>x.id==id);if(r&&acl(k)=='full')r.sby='admin'}return SR(k,id,st)}}
+
 try{if(me())render()}catch(e){}
 })();
-<\/script><style>@supports(-webkit-touch-callout:none){input,select,textarea{font-size:16px!important}}</style><style id="prv-css">
-#prv{position:fixed;inset:0;z-index:100001;background:var(--bg);color:var(--ink);display:none;flex-direction:column;font-family:inherit}
-#prv.on{display:flex}
-#prv{width:100%;max-width:100vw;overflow:hidden;touch-action:pan-y;overscroll-behavior:contain}
-#prv .pb{overflow-x:hidden!important;overflow-y:auto;touch-action:pan-y;overscroll-behavior-x:none;width:100%;box-sizing:border-box}
-#prv .pb *{max-width:100%;box-sizing:border-box;overflow-wrap:anywhere;word-break:normal}
-#prv .pb .in{width:100%;min-width:0}
-#prv .pb table{table-layout:fixed;min-width:0!important;width:100%!important;max-width:100%!important}
-#prv .pb th,#prv .pb td{min-width:0!important;width:auto}
-#prv .pb th:first-child,#prv .pb td:first-child{width:32%!important}
-#prv .ph{display:flex;align-items:center;gap:10px;padding:calc(12px + env(safe-area-inset-top)) 14px 12px;background:var(--navy);color:#fff}
-#prv .ph b{font-size:17px;flex:1}
-#prv .ph button{background:#ffffff1f;border:0;color:#fff;width:38px;height:38px;border-radius:12px;font:inherit;font-size:20px;cursor:pointer}
-#prv .pb{flex:1;overflow-y:auto;padding:16px 16px calc(28px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch;line-height:1.95;font-size:14.5px}
-#prv .pb .in{max-width:760px;margin:auto}
-#prv .pb .lead{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px 16px;margin-bottom:14px}
-#prv .pb .lead small{color:var(--mut);display:block;font-weight:600}
-#prv .pb h3{margin:20px 0 6px;font-size:16px;color:var(--green);display:flex;gap:8px;align-items:center}
-#prv .pb h3 i{font-style:normal;background:var(--green);color:#fff;border-radius:8px;min-width:26px;height:26px;display:inline-grid;place-items:center;font-size:13px}
-#prv .pb p{margin:4px 0}
-#prv .pb ul{margin:4px 0;padding-inline-start:22px}
-#prv .pb li{margin:3px 0}
-#prv .pb .note{background:var(--card);border:1px solid var(--line);border-inline-start:4px solid var(--green);border-radius:12px;padding:10px 14px;margin:10px 0}
-#prv .pb table{width:100%;border-collapse:collapse;margin:8px 0;background:var(--card);border-radius:12px;overflow:hidden;font-size:13.5px}
-#prv .pb th,#prv .pb td{border:1px solid var(--line);padding:8px 10px;text-align:start;vertical-align:top}
-#prv .pb th{background:var(--bg);color:var(--mut)}
-.prv-lnk{display:block;margin:14px auto 0;background:none;border:0;color:var(--mut);font:inherit;font-size:13px;font-weight:700;text-decoration:underline;cursor:pointer}
-</style>
-<script>
-/* سياسة الخصوصية — توضح للمدارس المنضمة للمنصة كيفية التعامل مع البيانات */
-(function(){
-var PLAT='منصة المدارس الذكية',SCH='مدرسة اقرأ للإبداع العلمي',UPD='28 أكتوبر 2026';
-var sec=[
-['نبذة وتعريفات',`<p>توضّح هذه السياسة كيف تتعامل ${PLAT} («المنصة» أو «نحن») مع البيانات عند انضمام أي مدرسة إليها، وما يترتب على ذلك من التزامات علينا وعلى المدرسة. وتسري على كل مستخدمي المنصة: الإدارة، والمعلمين، والطلاب، وأولياء الأمور.</p>
-<ul><li><b>المدرسة:</b> الجهة التعليمية المنضمة إلى المنصة (مثل ${SCH}).</li><li><b>مزوّد المنصة:</b> الجهة التي تطوّر المنصة وتشغّلها وتستضيفها تقنياً.</li><li><b>بيانات المدرسة:</b> كل ما تُدخله المدرسة أو مستخدموها في المنصة.</li></ul>`],
-['من يملك البيانات ومن يديرها',`<div class="note">بيانات المدرسة ملك للمدرسة. تعمل المنصة بصفة «جهة معالِجة» تُشغّل البيانات نيابةً عن المدرسة وبحسب تعليماتها، وتبقى المدرسة هي «الجهة المتحكّمة» في بيانات طلابها وموظفيها وأولياء أمورها.</div>
-<p>لا نبيع بيانات المدرسة، ولا نؤجّرها، ولا نستخدمها في الإعلانات، ولا نشاركها مع مدرسة أخرى.</p>`],
-['البيانات التي تُعالَج على المنصة',`<table><tr><th>الفئة</th><th>أمثلة</th></tr>
-<tr><td>بيانات الطلاب</td><td>الاسم، الصف والشعبة، اسم المستخدم، الدرجات والحضور والسلوك، الواجبات</td></tr>
-<tr><td>بيانات أولياء الأمور</td><td>الاسم، رقم الهاتف، ارتباطهم بأبنائهم، المراسلات مع المدرسة</td></tr>
-<tr><td>بيانات الموظفين والمعلمين</td><td>الاسم، الدور الوظيفي، الصلاحيات، جداول الحصص</td></tr>
-<tr><td>البيانات المالية</td><td>الرسوم والأقساط وحركات المقصف (سجلات مالية داخلية، دون تخزين بيانات بطاقات مصرفية)</td></tr>
-<tr><td>الوسائط والمحتوى</td><td>الإعلانات، صور الأنشطة والألبومات، الملفات التعليمية</td></tr>
-<tr><td>بيانات تقنية</td><td>جلسات الدخول، نوع الجهاز والمتصفح، سجلات الأخطاء، إعدادات المظهر المحفوظة على الجهاز</td></tr></table>
-<p>نجمع الحد الأدنى اللازم لتشغيل خدمات المدرسة فقط.</p>`],
-['كيف نستخدم البيانات',`<ul><li>تشغيل الحسابات وتسجيل الدخول وعرض المعلومات لأصحابها.</li><li>تمكين المدرسة من إدارة الدراسة والمتابعة والتواصل مع أولياء الأمور.</li><li>إرسال الإشعارات والإعلانات التي تقررها المدرسة.</li><li>حماية الحسابات ومنع إساءة الاستخدام وإصلاح الأعطال وتحسين الأداء.</li></ul><p>لا نستخدم بيانات الطلاب لأي غرض تجاري أو تسويقي.</p>`],
-['الصلاحيات وحدود الاطلاع',`<ul><li><b>الطالب:</b> يرى بياناته فقط.</li><li><b>ولي الأمر:</b> يرى بيانات أبنائه المرتبطين بحسابه فقط.</li><li><b>المعلم:</b> يرى طلاب صفوفه ومواده فقط.</li><li><b>إدارة المدرسة:</b> تدير بيانات مدرستها وحدها، وتحدد صلاحيات موظفيها.</li><li><b>مزوّد المنصة:</b> لا يطّلع على بيانات المدرسة إلا عند الضرورة التقنية (دعم أو صيانة) وبطلب المدرسة أو بموافقتها.</li></ul><p>تُعزل بيانات كل مدرسة عن غيرها عزلاً منطقياً بقواعد وصول على مستوى قاعدة البيانات.</p>`],
-['حماية البيانات',`<ul><li>تشفير الاتصال بين التطبيق والخادم (HTTPS).</li><li>مصادقة المستخدمين وتخزين كلمات المرور بصورة مشفّرة (مجزّأة) لا يمكن قراءتها.</li><li>قواعد صلاحيات صارمة على جداول البيانات، ونسخ احتياطية دورية.</li><li>تنقية المحتوى المُدخل لمنع الشيفرات الخبيثة.</li></ul>
-<p>لا يوجد نظام محصّن بالكامل، ولذلك نلتزم بإبلاغ المدرسة دون تأخير عند اكتشاف أي اختراق يمس بياناتها، مع بيان نطاقه وما اتُّخذ لمعالجته.</p>`],
-['الاستضافة ومقدّمو الخدمات',`<p>تُخزَّن البيانات لدى مزوّد استضافة سحابية موثوق (Supabase)، وقد تقع خوادمه خارج ليبيا. لا نشارك البيانات مع أي طرف ثالث إلا مقدّمي الخدمات التقنية اللازمين لتشغيل المنصة، وبالقدر اللازم فقط، وبما يلزمهم بحماية السرّية. وقد نفصح عن بيانات إذا ألزمتنا بذلك جهة قضائية مختصة، وسنُخطر المدرسة بذلك ما لم يمنع القانون.</p>`],
-['بيانات الأطفال',`<p>معظم مستخدمي المنصة قاصرون، لذلك تُنشأ حساباتهم عبر المدرسة وبمعرفة أولياء أمورهم، ولا نتيح لهم مراسلة جهات خارجية ولا نشر بيانات علنية. تتحمل المدرسة مسؤولية الحصول على موافقة أولياء الأمور اللازمة (بما فيها نشر صور الأنشطة) وفق أنظمتها.</p>`],
-['مدة الاحتفاظ والحذف',`<ul><li>نحتفظ بالبيانات طوال مدة اشتراك المدرسة في المنصة.</li><li>عند انتهاء الاشتراك أو طلب المدرسة الإنهاء: تُسلَّم لها نسخة كاملة بصيغة قابلة للقراءة، ثم تُحذف بياناتها من أنظمتنا النشطة خلال 30 يوماً، وتُمحى النسخ الاحتياطية خلال 90 يوماً.</li><li>يمكن للمدرسة طلب حذف سجل فرد (طالب أو موظف) في أي وقت.</li></ul>`],
-['حقوق الأفراد والمدرسة',`<p>للمدرسة ولأصحاب البيانات (أو أولياء أمورهم) طلب الاطلاع على البيانات أو تصحيحها أو حذفها أو تصديرها. تُوجَّه الطلبات إلى إدارة المدرسة أولاً، وتتولى المنصة تنفيذ ما تطلبه المدرسة تقنياً في أسرع وقت.</p>`],
-['التخزين على الجهاز وملفات الارتباط',`<p>يحفظ التطبيق على جهازك إعدادات بسيطة (كالمظهر الفاتح/الداكن وحالة الدخول) لتحسين التجربة فقط. لا نستخدم أدوات تتبّع إعلانية. ويمكنك مسحها من إعدادات المتصفح، علماً أنك ستحتاج حينها إلى تسجيل الدخول من جديد.</p>`],
-['التزامات المدرسة المنضمة',`<ul><li>إدخال بيانات صحيحة ومحدّثة، وعدم رفع محتوى مخالف للأنظمة أو يمس خصوصية الغير.</li><li>تسليم بيانات الدخول لأصحابها فقط، وسحب صلاحيات من تنتهي علاقتهم بالمدرسة.</li><li>إبلاغ أولياء الأمور والمعلمين بهذه السياسة والحصول على الموافقات اللازمة.</li><li>إبلاغنا فوراً عند الاشتباه في اختراق أي حساب.</li></ul>`],
-['التعديلات على السياسة',`<p>قد نحدّث هذه السياسة، وسنُخطر المدرسة بأي تغيير جوهري قبل سريانه بمدة معقولة. استمرار استخدام المنصة بعد التحديث يعني الموافقة عليه.</p>`],
-['التواصل معنا',`<p>لأي استفسار أو طلب يخص الخصوصية، تواصل مع إدارة المدرسة، أو مع فريق المنصة عبر قناة الدعم المعتمدة لديكم.</p>`]
-];
-function build(){
- var o=document.getElementById('prv');if(o)return o;
- o=document.createElement('div');o.id='prv';o.setAttribute('role','dialog');o.setAttribute('aria-label','سياسة الخصوصية');
- var h='<div class="ph"><b>سياسة الخصوصية</b><button type="button" id="prvx" aria-label="إغلاق">✕</button></div><div class="pb"><div class="in"><div class="lead"><b>سياسة الخصوصية وحماية البيانات للمدارس المنضمة</b><small>'+PLAT+' · آخر تحديث: '+UPD+'</small><p>بانضمام المدرسة إلى المنصة، فإنها توافق على ما ورد أدناه.</p></div>';
- sec.forEach(function(x,i){h+='<h3><i>'+(i+1)+'</i>'+x[0]+'</h3>'+x[1]});
- h+='<p style="text-align:center;color:var(--mut);font-size:12px;margin-top:24px">'+PLAT+' © 2026</p></div></div>';
- o.innerHTML=h;document.body.appendChild(o);
- o.querySelector('#prvx').addEventListener('click',closePrv);
- return o}
-function openPrv(){var o=build();o.classList.add('on');o.querySelector('.pb').scrollTop=0;document.documentElement.style.overflow='hidden'}
-function closePrv(){var o=document.getElementById('prv');if(o)o.classList.remove('on');document.documentElement.style.overflow=''}
-window.openPrivacy=openPrv;
-addEventListener('keydown',function(e){if(e.key==='Escape')closePrv()});
-/* رابط في شاشة الدخول (لوحة الإدارة) */
-function addLogin(){}
-/* رابط في قسم «أخرى» أسفل دليل الاستخدام */
-function addSide(){try{var nv=document.getElementById('nv');if(!nv||document.getElementById('sd-prv'))return;var mu=null;try{mu=me()}catch(e){}if(!mu||mu.role!='مدير عام')return;
- var g=Array.prototype.filter.call(nv.querySelectorAll('.gh'),function(x){return x.dataset.g=='أخرى'})[0];if(!g)return;
- var gb=g.nextElementSibling;if(!gb)return;
- var a=document.createElement('a');a.href='#';a.id='sd-prv';
- a.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg>سياسة الخصوصية';
- a.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();document.body.classList.remove('nv');openPrv()});
- gb.appendChild(a);['plan','pubstat'].forEach(function(k){var l=Array.prototype.filter.call(gb.querySelectorAll('a'),function(x){return (x.getAttribute('onclick')||'').indexOf("go('"+k+"')")>=0})[0];if(l)gb.appendChild(l)})}catch(e){}}
-if(typeof window.render==='function'&&!window.render.__prv){var R0=window.render;window.render=function(){var r=R0.apply(this,arguments);addSide();return r};window.render.__prv=1}
-function init(){addLogin();addSide()}
-new MutationObserver(addLogin).observe(document.documentElement,{childList:true,subtree:true});
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
-})();
-<\/script>
+<\/script><style>@supports(-webkit-touch-callout:none){input,select,textarea{font-size:16px!important}}</style>
+
 <script>
 /* ===== تطبيق حدود الباقة: لا يُسمح بإضافة سجل جديد عند بلوغ الحد ===== */
 (function(){
@@ -7233,11 +7429,11 @@ if(typeof window.render==='function'&&!window.render.__plx){var R0=window.render
  GRPS[0][2].unshift('schools');TSB.schools=()=>db.schools.length+' مدارس';
  const SCH=()=>db.schools.map(s=>[s.id,s.name]),sOf=b=>b&&db.schools.find(s=>s.id==b.school);
  E.schools={t:'المدارس',one:'مدرسة',
-  cols:[['name','اسم المدرسة'],['city','المدينة'],['manager','مدير المدرسة'],['phone','الهاتف'],
+  cols:[['name','اسم المدرسة'],['country','البلد'],['city','المدينة'],['manager','مدير المدرسة'],['phone','الهاتف'],
    ['n','الفروع',r=>db.branches.filter(b=>b.school==r.id).length],
    ['k','الطلاب',r=>db.students.filter(s=>{const b=db.branches.find(x=>x.id==s.branch);return b&&b.school==r.id}).length],
    ['status','الحالة',r=>tg(r.status||'فعالة',(r.status||'فعالة')=='فعالة'?'var(--green)':'var(--red)')]],
-  f:[['name','اسم المدرسة','text'],['city','المدينة','text',null,1],['manager','مدير المدرسة','text',null,1],['phone','الهاتف','tel',null,1],['status','الحالة','select',['فعالة','موقوفة']]]};
+  f:[['name','اسم المدرسة','text'],['country','البلد','text',null,1],['city','المدينة','text',null,1],['branchName','اسم الفرع (يُنشأ مع المدرسة الجديدة)','text',null,1],['manager','مدير المدرسة','text',null,1],['phone','الهاتف','tel',null,1],['status','الحالة','select',['فعالة','موقوفة']]]};
  V.schools=()=>vTable('schools');
  /* ربط الفرع بمدرسته — يظهر لمدير المنصة فقط */
  {const bc=E.branches.cols.slice(),bf=E.branches.f.slice();
@@ -7249,7 +7445,9 @@ if(typeof window.render==='function'&&!window.render.__plx){var R0=window.render
  const AP=allow;allow=function(k,d){
   if(k=='users'){if(d.role=='مدير منصة'){if(!isP()){ALM='إنشاء حساب مدير منصة متاح لمدير المنصة فقط';return false}d.role='مدير عام';d.plat=1;d.branch=''}}
   if(k=='branches'&&!isP())delete d.school;
-  if(k=='schools'){if(!isP()){ALM='إضافة المدارس متاحة لمدير المنصة فقط';return false}d.name=String(d.name||'').trim();if(!d.name){ALM='اكتب اسم المدرسة';return false}}
+  if(k=='schools'){if(!isP()){ALM='إضافة المدارس متاحة لمدير المنصة فقط';return false}d.name=String(d.name||'').trim();if(!d.name){ALM='اكتب اسم المدرسة';return false}
+   const bn=String(d.branchName||'').trim();delete d.branchName;const h=document.querySelector('#fm h3'),isNew=!!(h&&h.textContent.trim().indexOf('إضافة')==0);
+   if(isNew){if(!d.id)d.id=uid();const ok=AP.apply(this,arguments);if(ok)db.branches.push({id:uid(),name:bn||(d.name+' - الفرع الرئيسي'),city:d.city||'',manager:'',phone:'',school:d.id});return ok}}
   return AP.apply(this,arguments)};
  const SP=scope0;scope0=function(k){if(k=='schools')return db.schools||[];const l=SP(k);if(k=='users'&&!isP())return l.filter(r=>!r.plat);return l};
  const D0=del;del=function(k,id){
@@ -7259,6 +7457,76 @@ if(typeof window.render==='function'&&!window.render.__plx){var R0=window.render
  const RP=render;render=function(){RP.apply(this,arguments);if(isP()){const t=document.querySelector('aside small');if(t)t.textContent='مدير المنصة'}};
  try{if(me())render()}catch(e){}
 })();
+<\/script>
+<script>/* ===== أقساط اشتراك المدارس (لمدير المنصة): عدد الدفعات + تاريخ ومبلغ كل دفعة + تسجيل السداد + إيقاف تلقائي عند التأخر ===== */
+(function(){try{
+ const isP=()=>{const u=me();return !!(u&&u.plat)};
+ db.subs=db.subs||[];
+ if(!NAV.some(n=>n[0]=='subs'))NAV.splice(2,0,['subs','أقساط الاشتراكات']);
+ I.subs=I.schools;GRPS[0][2].splice(1,0,'subs');
+ const T=()=>new Date().toISOString().slice(0,10),GR=7,fm=x=>(+x||0).toLocaleString('en')+' د.ل';
+ const dd=s=>Math.floor((new Date(T())-new Date(s))/864e5);
+ const stt=p=>p.pd?['مسدّد','var(--green)']:(dd(p.d)>0?['متأخر','var(--red)']:['قادم','var(--gold)']);
+ const od=s=>s.plan.filter(p=>!p.pd&&dd(p.d)>0).length;
+ TSB.subs=()=>{const n=db.subs.reduce((a,s)=>a+od(s),0);return n?n+' متأخرة':db.subs.length+' خطة'};
+ window.SB=window.SB||{s:'',t:'',n:3,rows:[]};
+ const rd=()=>{['s','t','n'].forEach(k=>{const e=document.getElementById('sb_'+k);if(e)SB[k]=e.value})};
+ window.sbGen=()=>{rd();const n=Math.max(1,Math.min(24,+SB.n||1)),t=+SB.t||0,b=Math.floor(t/n*100)/100;SB.n=n;
+  SB.rows=Array.from({length:n},(_,i)=>{const d=new Date();d.setMonth(d.getMonth()+i+1);return{d:d.toISOString().slice(0,10),a:i==n-1?Math.round((t-b*(n-1))*100)/100:b}});render()};
+ window.sbEdit=(i,k,v)=>{SB.rows[i][k]=k=='a'?+v:v};
+ window.sbSave=()=>{rd();const t=+SB.t,sum=SB.rows.reduce((a,r)=>a+(+r.a||0),0);
+  if(!SB.s)return alert('اختر المدرسة');if(!(t>0))return alert('اكتب إجمالي الاشتراك');if(!SB.rows.length)return alert('اضغط «توليد الدفعات» أولاً');
+  if(SB.rows.some(r=>!r.d||!(r.a>0)))return alert('لكل دفعة تاريخ ومبلغ');
+  if(Math.abs(sum-t)>.01)return alert('مجموع الدفعات ('+fm(sum)+') لا يساوي الإجمالي ('+fm(t)+')');
+  db.subs.push({id:uid(),school:SB.s,total:t,auto:1,plan:SB.rows.map(r=>({id:uid(),d:r.d,a:+r.a,pd:''}))});
+  try{lg('إضافة','أقساط الاشتراكات','خطة أقساط '+fm(t)+' على '+SB.rows.length+' دفعات','')}catch(e){}
+  SB={s:'',t:'',n:3,rows:[]};save();render()};
+ window.sbPay=(i,j,u)=>{const p=db.subs.find(s=>s.id==i).plan.find(x=>x.id==j);p.pd=u?'':T();save();render()};
+ window.sbAuto=(i,v)=>{db.subs.find(s=>s.id==i).auto=v?1:0;save();render()};
+ window.sbDel=i=>{if(confirm('حذف خطة الأقساط؟')){db.subs=db.subs.filter(s=>s.id!=i);save();render()}};
+ const chk=()=>{let c=0;db.subs.forEach(s=>{const sc=db.schools.find(x=>x.id==s.school);if(!sc)return;
+  const late=s.auto&&s.plan.some(p=>!p.pd&&dd(p.d)>GR);
+  if(late&&sc.status!='موقوفة'){sc.status='موقوفة';s.susp=1;c=1}else if(!late&&s.susp){sc.status='فعالة';s.susp=0;c=1}});if(c)save()};
+ V.subs=()=>{if(!isP())return'<div class="card"><p>هذه الصفحة لمدير المنصة فقط</p></div>';chk();
+  const nm=id=>{const s=db.schools.find(x=>x.id==id);return s?esc(s.name):'—'};
+  const f=`<div class="card"><h3>خطة أقساط جديدة</h3>
+  <select id="sb_s"><option value="">اختر المدرسة</option>${db.schools.map(s=>`<option value="${esc(s.id)}"${SB.s==s.id?' selected':''}>${esc(s.name)}</option>`).join('')}</select>
+  <input id="sb_t" type="number" min="0" placeholder="إجمالي الاشتراك (د.ل)" value="${SB.t}" style="margin-top:8px">
+  <input id="sb_n" type="number" min="1" max="24" placeholder="على كم دفعة؟" value="${SB.n}" style="margin-top:8px">
+  <button class="btn o" style="margin-top:10px;width:100%" onclick="sbGen()">توليد الدفعات</button>
+  ${SB.rows.map((r,i)=>`<div style="display:flex;gap:8px;margin-top:8px;align-items:center"><b style="flex:none">${i+1}</b><input type="date" value="${r.d}" onchange="sbEdit(${i},'d',this.value)"><input type="number" min="0" value="${r.a}" onchange="sbEdit(${i},'a',this.value)"></div>`).join('')}
+  ${SB.rows.length?'<button class="btn" style="margin-top:12px;width:100%" onclick="sbSave()">حفظ الخطة</button>':''}</div>`;
+  const L=db.subs.map(s=>{const pd=s.plan.filter(p=>p.pd).reduce((a,p)=>a+p.a,0);
+   return`<div class="card"><div style="display:flex;justify-content:space-between;gap:8px"><h3>${nm(s.school)}</h3><button class="btn o" onclick="sbDel('${s.id}')">حذف</button></div>
+   <p style="margin:4px 0 8px">المسدّد ${fm(pd)} من ${fm(s.total)} — المتبقي ${fm(s.total-pd)}</p>
+   ${s.plan.map((p,i)=>{const x=stt(p);return`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--bd,#0002)"><span>${i+1}) ${p.d} — ${fm(p.a)}</span><span style="display:flex;gap:6px;align-items:center">${tg(x[0]+(p.pd?' '+p.pd:''),x[1])}<button class="btn o" onclick="sbPay('${s.id}','${p.id}'${p.pd?',1':''})">${p.pd?'تراجع':'تسجيل سداد'}</button></span></div>`}).join('')}
+   <label style="display:flex;gap:8px;margin-top:10px"><input type="checkbox" ${s.auto?'checked':''} onchange="sbAuto('${s.id}',this.checked)"> إيقاف المدرسة تلقائيًا إذا تأخر السداد أكثر من ${GR} أيام</label></div>`}).join('');
+  return`<div class="ph"><h2>أقساط الاشتراكات</h2></div>${f}${L||'<div class="card"><p>لا توجد خطط أقساط بعد</p></div>'}`};
+ try{if(me())render()}catch(e){}
+}catch(e){console.error(e)}})();
+<\/script>
+<script>/* ===== (6) الشكاوى والاقتراحات  (11) قوالب المدارس ===== */
+(function(){try{
+ const ST=['جديدة','قيد المعالجة','مغلقة'],CO={'جديدة':'var(--red)','قيد المعالجة':'var(--gold)','مغلقة':'var(--green)'};
+ db.compl=db.compl||[];
+ E.compl={t:'الشكاوى والاقتراحات',one:'رسالة',
+  cols:[['student','الطالب',r=>esc(sn(r.student))],['type','النوع',r=>tg(r.type||'شكوى',r.type=='اقتراح'?'var(--navy)':'var(--gold)')],['text','الرسالة',r=>esc(String(r.text||'').slice(0,60))],['st','الحالة',r=>tg(r.st||'جديدة',CO[r.st||'جديدة'])],['ts','التاريخ',r=>r.ts?new Date(r.ts).toISOString().slice(0,10):'—']],
+  f:[['student','الطالب','select',()=>db.students.map(s=>[s.id,s.name])],['type','النوع','select',['شكوى','اقتراح']],['text','نص الرسالة','textarea'],['st','الحالة','select',ST],['reply','رد الإدارة (يظهر لولي الأمر)','textarea',null,1]]};
+ V.compl=()=>vTable('compl');
+ const SC=scope0;scope0=function(k){if(k=='compl'){db.compl=db.compl||[];return cur=='all'?db.compl:db.compl.filter(r=>!r.branch||r.branch==cur)}return SC(k)};
+ {const i=NAV.findIndex(n=>n[0]=='trips');NAV.splice(i<0?NAV.length:i+1,0,['compl','الشكاوى والاقتراحات'])}
+ I.compl='M4 5h16v11H8l-4 4zM8 9h8M8 12h5';GRPS[0][2].push('compl');AU_L.compl='الشكاوى والاقتراحات';
+ TSB.compl=()=>{const n=db.compl.filter(r=>(r.st||'جديدة')=='جديدة').length;return n?n+' جديدة':db.compl.length+' رسالة'};
+ /* قوالب المدارس: تُنشئ صفوف وفصول الفرع الجديد */
+ const TP={'ابتدائي (1-6)':['الأول','الثاني','الثالث','الرابع','الخامس','السادس'],'إعدادي (7-9)':['السابع','الثامن','التاسع'],'أساسي (1-9)':['الأول','الثاني','الثالث','الرابع','الخامس','السادس','السابع','الثامن','التاسع'],'ثانوي (10-12)':['العاشر','الحادي عشر','الثاني عشر']};
+ E.schools.f.push(['template','قالب المدرسة (يُنشئ الصفوف والفصول للفرع الجديد)','select',['بدون قالب',...Object.keys(TP)],1]);
+ const A3=allow;allow=function(k,d){
+  if(k!='schools')return A3.apply(this,arguments);
+  const tp=d.template,isNew=!d.id;delete d.template;const ok=A3.apply(this,arguments);
+  if(ok&&isNew&&TP[tp]){const b=db.branches.filter(x=>x.school==d.id).pop();
+   if(b)TP[tp].forEach(g=>{if(!GR.includes(g))GR.push(g);db.classes.push({id:uid(),name:g+' أ',branch:b.id,grade:g,shift:'صباحي',teacher:'',cap:30})});save()}
+  return ok};
+}catch(e){console.error(e)}})();
 <\/script>
 <script>/* ===== فلاتر إضافية: (1) فلتر المدرسة لمدير المنصة  (2) فلتر السنة الدراسية/الفصل في قوائم الطلاب ===== */
 (function(){try{
@@ -7477,6 +7745,49 @@ if(typeof window.render==='function'&&!window.render.__plx){var R0=window.render
  try{if(me())render()}catch(x){}
 }catch(x){console.error('logo patch',x)}})();
 <\/script>
+<script>/* ===== هوية كل مدرسة: لون + عبارة + مولّد كود الهوية (JSON / CSS / Flutter) ===== */
+(function(){try{
+ const e=E.schools;if(!e||e.f.some(f=>f[0]=='color'))return;
+ const DEF='#2f3a49',HEX=/^#[0-9a-fA-F]{6}$/;
+ const lum=h=>{const c=[1,3,5].map(i=>parseInt(h.substr(i,2),16)/255).map(v=>v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4));return .2126*c[0]+.7152*c[1]+.0722*c[2]};
+ /* يُغمَّق اللون تلقائياً إن كان فاتحاً لتبقى الكتابة البيضاء مقروءة */
+ const fit=h=>{if(!HEX.test(h||''))return DEF;h=h.toLowerCase();let n=0;while(lum(h)>.18&&n++<20){const c=[1,3,5].map(i=>Math.round(parseInt(h.substr(i,2),16)*.9));h='#'+c.map(v=>v.toString(16).padStart(2,'0')).join('')}return h};
+ const PRE=['#2f3a49','#0a7a45','#2f6fb0','#7a2f8a','#b5532a','#a8123c','#0f766e','#1e3a8a'];
+ e.f.push(['color','لون الهوية','text',null,1],['slogan','عبارة المدرسة (تظهر في صفحة الدخول)','text',null,1]);
+ e.cols.splice(1,0,['color','اللون',r=>HEX.test(r.color||'')?'<span style="display:inline-block;width:22px;height:22px;border-radius:7px;background:'+r.color+';vertical-align:middle;border:1px solid var(--line)"></span>':'—']);
+ const OF=openForm;openForm=function(k,id){const r=OF.apply(this,arguments);
+  if(k=='schools')try{const i=document.querySelector('#fm [name=color]');if(i){const lb=i.closest('label');i.type='hidden';
+   const w=document.createElement('div');w.style.cssText='margin:0 0 12px';
+   w.innerHTML='<div style="font-size:13px;color:var(--mut);margin-bottom:6px">لون هوية المدرسة (الأزرار والعناوين في تطبيقها ولوحتها)</div><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap" id="brs">'+PRE.map(c=>'<button type="button" data-c="'+c+'" style="width:30px;height:30px;border-radius:50%;border:2px solid var(--line);background:'+c+';cursor:pointer"></button>').join('')+'<input type="color" id="brc" style="width:38px;height:34px;border:0;padding:0;background:none"><button type="button" class="btn o" id="brx">افتراضي</button></div><div id="brp" style="margin-top:10px;padding:10px 14px;border-radius:12px;color:#fff;font-weight:800;text-align:center">معاينة</div>';
+   if(lb){lb.insertAdjacentElement('afterend',w);lb.style.display='none'}else i.insertAdjacentElement('afterend',w);
+   const pv=w.querySelector('#brp'),pc=w.querySelector('#brc'),sh=()=>{const v=HEX.test(i.value)?i.value:'';pv.style.background=fit(v);pv.textContent=v?'معاينة'+(fit(v)!=v.toLowerCase()?' (سيُغمَّق قليلاً لتبقى الكتابة واضحة)':''):'معاينة (اللون الافتراضي)';if(v)pc.value=v};
+   w.querySelectorAll('[data-c]').forEach(b=>b.onclick=()=>{i.value=b.dataset.c;sh()});pc.oninput=()=>{i.value=pc.value;sh()};w.querySelector('#brx').onclick=()=>{i.value='';sh()};sh()}}catch(x){console.error(x)}
+  return r};
+ const AP=allow;allow=function(k,d){if(k=='schools'){d.color=String(d.color||'').trim();if(d.color&&!HEX.test(d.color)){ALM='صيغة اللون غير صحيحة';return false}d.slogan=String(d.slogan||'').trim().slice(0,80)}return AP.apply(this,arguments)};
+ /* تطبيق اللون مباشرة على لوحة مستخدمي تلك المدرسة */
+ const mySch=()=>{const u=me();if(!u||u.plat)return null;let id=u.school;if(!id&&u.branch){const b=(db.branches||[]).find(x=>x.id==u.branch);id=b&&b.school}return(db.schools||[]).find(x=>x.id==(id||'main'))||null};
+ const paint=()=>{try{const s=mySch(),c=fit(s&&s.color),r=document.documentElement;r.style.setProperty('--navy',c);const m=document.querySelector('meta[name="theme-color"]');if(m)m.content=c}catch(x){}};
+ const R0=render;render=function(){const r=R0.apply(this,arguments);paint();return r};
+ /* مولّد كود الهوية: يُبنى من البيانات الحالية في كل مرة، فيتحدّث بعد أي تعديل */
+ const q=s=>String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\r?\n/g,' ');
+ const build=id=>{const s=(db.schools||[]).find(x=>x.id==id);if(!s)return null;
+  const code=id=='main'?(db.set&&db.set.pubCode):((db.pubstBy||{})[id]||{}).code||'',c=HEX.test(s.color||'')?s.color.toLowerCase():DEF,f=fit(c);let base='';try{base=typeof pubUrl=='function'?pubUrl():''}catch(x){}
+  const url=base&&code?base+(base.includes('?')?'&':'?')+'school='+code:'';
+  const hx='0xFF'+f.slice(1).toUpperCase();
+  return{json:JSON.stringify({schoolId:s.id,name:s.name||'',slug:s.slug||'',city:s.city||'',slogan:s.slogan||'',primaryColor:c,appliedColor:f,loginCode:code,loginUrl:url,hasLogo:!!s.logo,status:s.status||'فعالة',plan:s.plan||''},null,2),
+   css:':root{\n  --navy:'+f+'; /* لون الهوية الأساسي */\n}\n/* اسم المدرسة: '+(s.name||'')+' */',
+   dart:"import 'package:flutter/material.dart';\n\nconst kSchoolName = '"+q(s.name)+"';\nconst kSchoolSlogan = '"+q(s.slogan)+"';\nconst kSchoolCode = '"+q(code)+"';\nconst kPrimary = Color("+hx+");\n\nfinal ThemeData schoolTheme = ThemeData(\n  useMaterial3: true,\n  fontFamily: 'Cairo',\n  colorScheme: ColorScheme.fromSeed(seedColor: kPrimary, primary: kPrimary),\n);",
+   logo:s.logo||'',name:s.name||''}};
+ let BC={t:'json',id:''};
+ window.brCode=(id,t)=>{if(id)BC.id=id;if(t)BC.t=t;const b=build(BC.id);if(!b){alert('المدرسة غير موجودة');return}
+  const T=[['json','JSON (إعدادات)'],['css','CSS (ويب)'],['dart','Flutter (Dart)']];
+  mdl('<div class="bx" style="max-width:640px"><h3>كود هوية: '+esc(b.name)+'</h3><p style="margin:4px 0 10px;color:var(--mut);font-size:13px">يُولَّد من بيانات المدرسة الحالية، فيتغيّر تلقائياً بعد أي تعديل في الاسم أو اللون أو العبارة.</p><div class="rw" style="margin-bottom:8px">'+T.map(x=>'<button class="btn '+(BC.t==x[0]?'g':'o')+'" onclick="brCode(\'\',\''+x[0]+'\')">'+x[1]+'</button>').join('')+'</div><textarea id="brt" readonly dir="ltr" style="width:100%;height:240px;font-family:monospace;font-size:12.5px;padding:10px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink)">'+esc(b[BC.t])+'</textarea><div class="rw" style="margin-top:10px"><button class="btn g" onclick="brCopy()">نسخ</button><button class="btn o" onclick="brDl()">تنزيل ملف</button>'+(b.logo?'<a class="btn o" style="text-decoration:none;text-align:center" download="logo.png" href="'+esc(b.logo)+'">تنزيل الشعار</a>':'')+'<button class="btn o" onclick="closeM()">إغلاق</button></div></div>')};
+ window.brCopy=()=>{const t=document.getElementById('brt');if(!t)return;t.select();try{navigator.clipboard.writeText(t.value)}catch(x){document.execCommand('copy')}tmsg&&0;try{alert('تم النسخ')}catch(x){}};
+ window.brDl=()=>{const t=document.getElementById('brt');if(!t)return;const X={json:['school-brand.json','application/json'],css:['school-brand.css','text/css'],dart:['school_brand.dart','text/plain']}[BC.t];dl(X[0],t.value,X[1])};
+ const X0=e.x;e.x=r=>(X0?X0(r):'')+'<button onclick="brCode(\''+r.id+'\',\'json\')">كود الهوية</button>';
+ try{if(me())render()}catch(x){}
+}catch(x){console.error('brand patch',x)}})();
+ <\/script>
 <script>/* ===== مدير المنصة: بيانات دخول حسابه ===== */
 (function(){try{
  if(V.platacc)return;
@@ -7767,9 +8078,12 @@ if(typeof window.render==='function'&&!window.render.__plx){var R0=window.render
  const C=['اطلعت على العقد كاملاً وملاحقه ووافقت عليه.','أنا مخوّل قانوناً بالتعاقد نيابة عن المدرسة وبياناتي صحيحة.','أملك حق استخدام اسم المدرسة وشعارها ومحتواها وأفوّض الطرف الأول باستخدامها للنشر.','أقرّ أن حساب المطوّر مملوك للطرف الأول ولا ينتقل للمدرسة بعد انتهاء الاشتراك.','أوافق على معالجة بيانات الطلاب وأولياء الأمور وفق المادة 7 وحصلت على الموافقات اللازمة.'];
  const F=[['sn','اسم المدرسة'],['rn','اسم الممثل القانوني / المدير'],['rc','الصفة القانونية'],['lic','رقم الترخيص أو السجل'],['ad','العنوان'],['ph','رقم الهاتف'],['em','البريد الإلكتروني'],['an','اسم التطبيق'],['pp','رابط سياسة الخصوصية (https://)']];
  const fs='display:block;width:100%;font-size:14px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--ink);box-sizing:border-box;font-family:inherit',lb='display:block;color:var(--mut);font-weight:700;font-size:13px;margin:12px 0 5px';
- const body=k=>CT.map(a=>'<h4 style="margin:12px 0 2px">'+X(a[0])+'</h4><p style="margin:0">'+X(a[1])+'</p>').join('')+['play','ios'].map(q=>'<h4 style="margin:12px 0 2px">ملحق شروط النشر على '+PN[q]+'</h4><ol style="margin:0">'+PT[q].map(t=>'<li>'+X(t)+'</li>').join('')+'</ol>').join('');
+ const LT=(k,f)=>{f=f||{};const v=x=>f[x]?'<b>'+X(f[x])+'</b>':'………………………………';const st=k=='play'?'Google Play':k=='ios'?'App Store':'Google Play و App Store';
+  const it=['إنشاء وتصميم تطبيق إلكتروني خاص بالمدرسة، وإعداد موقع إلكتروني وخدمات رقمية مرتبطة بها، ونشره على '+st+'.','إنشاء وإدارة حساب المدرسة على المنصة، وإعداد البيانات والمعلومات الرسمية الخاصة بها.','نشر الإعلانات والإشعارات والأخبار المتعلقة بالمدرسة، وفقًا للمعلومات والتعليمات الصادرة عن إدارة المدرسة.','استخدام اسم المدرسة وشعارها وهويتها البصرية داخل التطبيق والموقع الإلكتروني المخصص لها.','إرسال الرسائل النصية والإشعارات الإلكترونية إلى أولياء الأمور والطلاب والموظفين، باستخدام اسم المدرسة كاسم للمرسل، بعد استكمال الموافقات والإجراءات المطلوبة من الجهات المختصة.','إدارة وتحديث الخدمات الإلكترونية والبيانات التي تعتمدها المدرسة، بما في ذلك بيانات الطلاب وأولياء الأمور والموظفين، وفقًا للصلاحيات المحددة.','اتخاذ الإجراءات التقنية اللازمة لتشغيل التطبيق والموقع الإلكتروني واستضافتهما وصيانتهما وتحديثهما.'];
+  return '<h3 style="text-align:center;margin:6px 0">خطاب تفويض رسمي</h3><p style="margin:4px 0"><b>إلى:</b> إدارة منصة المدارس الذكية<br><b>الموضوع:</b> تفويض بإنشاء وإدارة وتشغيل تطبيق إلكتروني خاص بالمدرسة</p><p>تحية طيبة وبعد،</p><p>نحن إدارة مدرسة:<br>اسم المدرسة: '+v('sn')+'<br>رقم الترخيص: '+v('lic')+'<br>العنوان: '+v('ad')+'<br>اسم مدير المدرسة: '+v('rn')+'<br>رقم الهاتف: '+v('ph')+'</p><p>نفوض بموجب هذا الخطاب منصة «المدارس الذكية»، وهي منصة متخصصة في إنشاء وإدارة التطبيقات الإلكترونية لأنظمة Android وiOS والمواقع الإلكترونية، وذلك للقيام بالأعمال التالية نيابةً عن المدرسة وبناءً على موافقتنا:</p><ol style="margin:0">'+it.map(t=>'<li>'+X(t)+'</li>').join('')+'</ol><h4 style="margin:12px 0 2px">إقرار وموافقة</h4><p style="margin:0">نقر نحن إدارة المدرسة بأننا نملك الصلاحية القانونية لمنح هذا التفويض، ونوافق على استخدام اسم المدرسة وشعارها وبياناتها في نطاق الخدمات المذكورة أعلاه.</p><p style="margin:6px 0 0">كما نقر بأن البيانات والمعلومات التي نقدمها للمنصة صحيحة، ونتحمل مسؤولية اعتماد محتوى الرسائل والإعلانات والبيانات التي تصدر عن المدرسة، مع التزامنا بالقوانين واللوائح المعمول بها.</p><p style="margin:6px 0 0">وتلتزم منصة المدارس الذكية بالحفاظ على سرية البيانات وعدم استخدامها خارج نطاق الخدمات المتفق عليها، واتخاذ التدابير التقنية اللازمة لحمايتها.</p><p style="margin:6px 0 0">يسري هذا التفويض من تاريخ توقيعه، ويظل نافذًا إلى حين إلغائه بموجب إشعار كتابي رسمي من إدارة المدرسة.</p><p>وتفضلوا بقبول فائق الاحترام والتقدير.</p><p>اسم مدير المدرسة: '+v('rn')+'<br>الصفة الوظيفية: '+v('rc')+'</p>'};
+ const body=(k,f)=>LT(k,f);
  const ap=r=>r.appr?'<h3>اعتماد محرر العقود (الطرف الأول)</h3><table><tr><td>المعتمِد</td><td>'+X(r.appr.by)+' — '+X(r.appr.cap)+'</td></tr><tr><td>تاريخ الاعتماد</td><td>'+X(r.appr.ts)+'</td></tr><tr><td>بصمة الاعتماد</td><td style="direction:ltr;word-break:break-all">'+X(r.appr.hash)+'</td></tr></table>':'<p><b>الحالة: بانتظار اعتماد محرر العقود</b></p>';
- const doc=r=>'<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>عقد '+X(r.id)+'</title><style>body{font-family:Cairo,Tahoma,sans-serif;max-width:800px;margin:24px auto;padding:0 16px;line-height:1.9;color:#111}table{width:100%;border-collapse:collapse;margin-bottom:12px}td{border:1px solid #bbb;padding:6px 10px}td:first-child{background:#f3f5f4;width:35%;font-weight:700}img{max-height:90px}</style></head><body><h2 style="text-align:center">عقد تقديم خدمات إنشاء ونشر وإدارة التطبيقات المدرسية والتعاقد الإلكتروني</h2><p style="text-align:center">المتجران: Google Play و App Store — رقم العقد: '+X(r.id)+' — التاريخ: '+X(r.ts.slice(0,10))+'</p><h3>بيانات الطرف الثاني (المدرسة)</h3><table>'+F.map(x=>'<tr><td>'+x[1]+'</td><td>'+X(r.f[x[0]])+'</td></tr>').join('')+'</table>'+body(r.k)+'<h3>التوقيع الإلكتروني</h3><table><tr><td>الموقّع</td><td>'+X(r.f.rn)+' — '+X(r.f.rc)+'</td></tr><tr><td>حساب الدخول</td><td>'+X(r.by)+'</td></tr><tr><td>تاريخ ووقت التوقيع</td><td>'+X(r.ts)+'</td></tr><tr><td>معرف عملية التوقيع</td><td>'+X(r.id)+'</td></tr><tr><td>بصمة المستند SHA-256</td><td style="direction:ltr;word-break:break-all">'+X(r.hash)+'</td></tr><tr><td>التوقيع</td><td><img src="'+r.sig+'"></td></tr></table>'+ap(r)+'</body></html>';
+ const doc=r=>'<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>تفويض '+X(r.id)+'</title><style>body{font-family:Cairo,Tahoma,sans-serif;max-width:800px;margin:24px auto;padding:0 16px;line-height:1.9;color:#111}table{width:100%;border-collapse:collapse;margin-bottom:12px}td{border:1px solid #bbb;padding:6px 10px}td:first-child{background:#f3f5f4;width:35%;font-weight:700}img{max-height:90px}</style></head><body><h2 style="text-align:center">خطاب تفويض — منصة المدارس الذكية</h2><p style="text-align:center">رقم التفويض: '+X(r.id)+' — التاريخ: '+X(r.ts.slice(0,10))+'</p><h3>بيانات الطرف الثاني (المدرسة)</h3><table>'+F.map(x=>'<tr><td>'+x[1]+'</td><td>'+X(r.f[x[0]])+'</td></tr>').join('')+'</table>'+body(r.k,r.f)+'<p style="margin-top:18px">التاريخ: ……… / ……… / …………………&emsp;&emsp;التوقيع: …………………………………</p><div style="border:1px dashed #888;width:150px;height:90px;text-align:center;line-height:90px;color:#888">ختم المدرسة الرسمي</div><h3>بيانات الطلب</h3><table><tr><td>مدير المدرسة</td><td>'+X(r.f.rn)+' — '+X(r.f.rc)+'</td></tr><tr><td>حساب الدخول</td><td>'+X(r.by)+'</td></tr><tr><td>تاريخ ووقت التوقيع</td><td>'+X(r.ts)+'</td></tr><tr><td>معرف عملية التوقيع</td><td>'+X(r.id)+'</td></tr><tr><td>بصمة المستند SHA-256</td><td style="direction:ltr;word-break:break-all">'+X(r.hash)+'</td></tr></table>'+ap(r)+'</body></html>';
  const hs=async s=>{try{const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));return[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')}catch(e){return'غير متاح'}};
  let SG=0;const R0=window.pubReq;
  const rq=id=>(db.pubReqs||[]).find(x=>x.id==id),cRq=r=>!r?null:r.contract?r:(r.cref?cRq(rq(r.cref)):null),cOf=r=>{const q=cRq(r);return q?q.contract:null};
@@ -7778,54 +8092,52 @@ if(typeof window.render==='function'&&!window.render.__plx){var R0=window.render
   R0(k);const r=(db.pubReqs||[]).find(x=>x.school==sc&&x.platform==k);if(!r)return;delete r.contract;r.cref=cRq(o).id;try{lg('طلب','الإعدادات','طلب نشر '+PN[k]+' بنفس العقد','')}catch(e){}save();render();ctPage(r.id,'تم إرسال الطلب بنفس العقد المعتمد/المرسل — لا حاجة لعقد جديد')};
  window.ctClr=()=>{const c=document.getElementById('ct_cv');if(c){c.getContext('2d').clearRect(0,0,c.width,c.height);SG=0}};
  window.ctOpen=k=>{const u=me()||{},v={sn:sNm(schId()),rn:u.name||''};SG=0;
-  $('#md').innerHTML='<div class="bx" style="max-height:88vh;overflow:auto"><h3>عقد النشر على Google Play و App Store</h3><small style="color:var(--mut)">عبّئ البيانات ووقّع لإرسال طلب النشر. سينزل العقد الموقّع كملف.</small>'
-   +'<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:800">قراءة العقد وشروط المتجرين</summary><div style="max-height:220px;overflow:auto;font-size:13px;line-height:1.8;margin-top:8px">'+body(k)+'</div></details>'
+  $('#md').innerHTML='<div class="bx" style="max-height:88vh;overflow:auto"><h3>تفويض النشر على المتاجر</h3><small style="color:var(--mut)">عبّئ البيانات وواحفظ التفويض ثم اطبعه، وقّعه بخط اليد واختمه بختم المدرسة، وارفع صورة النسخة الموقّعة والمختومة لإرسالها إلى إدارة المنصة.</small>'
+   +'<div style="max-height:260px;overflow:auto;font-size:13px;line-height:1.8;margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-radius:12px">'+body(k)+'</div>'
    +F.map(f=>'<label style="'+lb+'">'+f[1]+'</label><input id="ct_'+f[0]+'" value="'+X(v[f[0]]||'')+'" style="'+fs+(/^(pp|em|ph)$/.test(f[0])?';direction:ltr;text-align:left':'')+'">').join('')
-   +'<h4 style="margin:16px 0 4px">الإقرارات وشروط المتجرين</h4>'+C.concat(PT.play,PT.ios).map(t=>'<label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;line-height:1.7;margin:8px 0"><input type="checkbox" class="ct_k" style="margin-top:5px"><span>'+X(t)+'</span></label>').join('')
-   +'<label style="'+lb+'">التوقيع (ارسم بإصبعك أو الفأرة)</label><canvas id="ct_cv" width="600" height="200" style="width:100%;height:120px;border:1px dashed var(--line);border-radius:12px;background:#fff;touch-action:none"></canvas>'
-   +'<div class="rw" style="margin-top:14px"><button class="btn" id="ct_ok" style="background:var(--navy);color:#fff;box-shadow:none">توقيع وإرسال الطلب</button><button class="btn o" onclick="ctClr()">مسح التوقيع</button><button class="btn o" onclick="closeM()">إلغاء</button></div></div>';
+   +'<label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;line-height:1.7;margin:14px 0 0"><input type="checkbox" class="ct_k" style="margin-top:5px"><span>بياناتي صحيحة، وأنا مخوّل قانوناً بمنح هذا التفويض نيابة عن المدرسة.</span></label>'
+   +''
+   +'<div class="rw" style="margin-top:14px"><button class="btn" id="ct_ok" style="background:var(--navy);color:#fff;box-shadow:none">حفظ التفويض والمتابعة</button><button class="btn o" onclick="closeM()">إلغاء</button></div></div>';
   $('#md').className='md on';
-  const cv=document.getElementById('ct_cv'),g=cv.getContext('2d');g.lineWidth=3;g.lineCap='round';g.strokeStyle='#111';let d=0;
-  const P=e=>{const r=cv.getBoundingClientRect();return[(e.clientX-r.left)*cv.width/r.width,(e.clientY-r.top)*cv.height/r.height]};
-  cv.onpointerdown=e=>{d=1;try{cv.setPointerCapture(e.pointerId)}catch(x){}const p=P(e);g.beginPath();g.moveTo(p[0],p[1])};
-  cv.onpointermove=e=>{if(!d)return;const p=P(e);g.lineTo(p[0],p[1]);g.stroke();SG=1};
-  cv.onpointerup=cv.onpointercancel=()=>{d=0};
   document.getElementById('ct_ok').onclick=()=>ctSign(k)};
  window.ctSign=async k=>{const f={};let bad='';
   F.forEach(x=>{const v=(document.getElementById('ct_'+x[0]).value||'').trim();f[x[0]]=v;if(!v&&!bad)bad=x[1]});
   if(bad)return alert('أكمل الحقل: '+bad);
   if(!/^https:\/\/\S+$/i.test(f.pp))return alert('رابط سياسة الخصوصية يجب أن يبدأ بـ https://');
-  if([...document.querySelectorAll('.ct_k')].some(c=>!c.checked))return alert('يجب الموافقة على جميع الإقرارات والشروط');
-  if(!SG)return alert('ارسم التوقيع في المربع المخصص');
+  if([...document.querySelectorAll('.ct_k')].some(c=>!c.checked))return alert('يجب الموافقة على خطاب التفويض');
   const u=me()||{},ts=new Date().toISOString(),id='SG-'+Date.now().toString(36).toUpperCase()+Math.random().toString(36).slice(2,6).toUpperCase();
-  const rec={id,k,ts,st:'pend',f,by:u.name||u.user||'',sig:document.getElementById('ct_cv').toDataURL('image/png')};
+  const rec={id,k,ts,st:'pend',f,by:u.name||u.user||'',sig:''};
   rec.hash=await hs(JSON.stringify({id,k,ts,f,CT,p:PT}));
   R0(k);const r=(db.pubReqs||[]).find(x=>x.school==schId()&&x.platform==k);if(r){r.contract=rec;delete r.cref}
-  try{lg('طلب','الإعدادات','توقيع عقد نشر: '+PN[k]+' ('+id+')','')}catch(e){}
-  save();closeM();render();ctPage(r?r.id:'')};
+  try{lg('طلب','الإعدادات','توقيع تفويض نشر: '+PN[k]+' ('+id+')','')}catch(e){}
+  save();closeM();render();ctPage(r?r.id:'','تم حفظ التفويض — اضغط «طباعة / حفظ PDF»، وقّعه بخط اليد واختمه، ثم صوّره وارفعه هنا ليصل إلى إدارة المنصة')};
  window.ctDl=(id,t)=>{const r=(db.pubReqs||[]).find(x=>x.id==id),c=r&&r.contract;if(!c)return;
-  t=='j'?dl('contract-'+c.id+'.json',JSON.stringify(Object.assign({},c,{sig:'(صورة التوقيع داخل ملف HTML)',paper:c.paper?Object.assign({},c.paper,{data:'(ملف PDF منفصل)'}):undefined}),null,1),'application/json'):dl('contract-'+c.id+'.html',doc(c),'text/html')};
+  t=='j'?dl('contract-'+c.id+'.json',JSON.stringify(Object.assign({},c,{sig:'(صورة التوقيع داخل ملف HTML)',pages:undefined,paper:c.paper?Object.assign({},c.paper,{data:'(ملف منفصل)'}):undefined}),null,1),'application/json'):dl('contract-'+c.id+'.html',doc(c),'text/html')};
 
  const ST={pend:['بانتظار اعتماد محرر العقود','var(--gold)'],ok:['معتمد','var(--green)'],rej:['أُعيد للمدرسة للتعديل','var(--red)']};
  const getC=id=>cOf(rq(id));
  const bt=(t,f,pri)=>'<button class="btn'+(pri?'':' o')+'" '+(pri?'style="background:var(--navy);color:#fff;box-shadow:none" ':'')+'onclick="'+f+'">'+t+'</button>';
  window.ctX=()=>{const o=document.getElementById('ctpg');if(o)o.remove()};
- const view=(id,mgr,msg)=>{const c=getC(id);if(!c)return;const r0=(db.pubReqs||[]).find(x=>x.id==id),s=c.st=='ok'?(r0&&r0.status=='ok'?['منشور','var(--green)']:['معتمد — بانتظار النشر من إدارة المنصة','var(--green)']):c.st=='rej'?ST.rej:c.paper?['أُرسل لإدارة المنصة — بانتظار الاعتماد ثم النشر','var(--gold)']:['بانتظار رفع النسخة الورقية المعتمدة','var(--gold)'],k=c.k,u=me()||{};
-  const steps=[['تعبئة وتوقيع',1],['رفع النسخة الورقية',!!c.paper],['اعتماد محرر العقود',c.st=='ok'],['النشر',!!(r0&&r0.status=='ok')]].slice(0,mgr?4:2).map((x,i)=>'<div style="flex:1;text-align:center;font-size:12px;font-weight:700;color:'+(x[1]?'var(--green)':'var(--mut)')+'">'+(x[1]?'✓':(i+1))+'<br>'+x[0]+'</div>').join('');
-  let act='';const pa=c.paper,pp='<div class="card" style="margin-top:10px;font-size:13px;line-height:1.8"><b>النسخة الورقية المعتمدة (PDF أو صورة)</b><br>'+(pa?'✓ '+X(pa.name)+' — '+X(pa.ts)+'<br>محرر العقود الرسمي: '+X(pa.ed)+' ('+X(pa.no)+')<br>'+bt('عرض الملف','ctPaperDl(\''+id+'\')'):'لم يُرفع بعد.')+(!mgr&&c.st=='pend'&&!c.subAt?'<p>اطبع العقد، واعتمده (ختم وتوقيع) عند محرر عقود رسمي، ثم صوّره (صورة أو PDF) وارفعه هنا.</p><label style="'+lb+'">اسم محرر العقود الرسمي</label><input id="cp_e" value="'+X(pa?pa.ed:'')+'" style="'+fs+'"><label style="'+lb+'">رقم القيد / الختم</label><input id="cp_n" value="'+X(pa?pa.no:'')+'" style="'+fs+'"><label style="'+lb+'">ملف PDF أو صورة</label><input type="file" accept="application/pdf,image/*" onchange="ctPaper(\''+id+'\',this)" style="'+fs+'">':(!mgr&&c.st=='pend'?'<p style="color:var(--mut)">تم الإرسال — لا يمكن الإرسال مرة أخرى حتى ترد إدارة المنصة (اعتماد أو إرجاع).</p>':''))+'</div>';
+ const view=(id,mgr,msg)=>{const c=getC(id);if(!c)return;const r0=(db.pubReqs||[]).find(x=>x.id==id),s=c.st=='ok'?(r0&&r0.status=='ok'?['منشور','var(--green)']:['معتمد — بانتظار النشر من إدارة المنصة','var(--green)']):c.st=='rej'?ST.rej:(c.paper||c.subAt)?['أُرسل لإدارة المنصة — بانتظار الاعتماد ثم النشر','var(--gold)']:['بانتظار رفع النسخة الورقية المعتمدة','var(--gold)'],k=c.k,u=me()||{};
+  const steps=[['تعبئة وطباعة التفويض',1],['رفع النسخة الموقّعة والمختومة',!!c.paper],['اعتماد الإدارة',c.st=='ok'],['النشر',!!(r0&&r0.status=='ok')]].slice(0,mgr?4:2).map((x,i)=>'<div style="flex:1;text-align:center;font-size:12px;font-weight:700;color:'+(x[1]?'var(--green)':'var(--mut)')+'">'+(x[1]?'✓':(i+1))+'<br>'+x[0]+'</div>').join('');
+  let act='';const pa=c.paper,pp='<div class="card" style="margin-top:10px;font-size:13px;line-height:1.8"><b>النسخة الموقّعة والمختومة (PDF أو صورة)</b><br>'+(pa?'✓ '+X(pa.name)+' — '+X(pa.ts)+'<br>'+(c.pages||[pa]).map((q,n)=>bt('عرض '+(c.pages&&c.pages.length>1?'الصفحة '+(n+1):'الملف'),'ctPaperDl(\''+id+'\','+n+')')).join(''):'لم تُرفع بعد.')+(!mgr&&((c.st=='pend'&&!c.subAt)||c.st=='rej')?'<p>1) اضغط «طباعة / حفظ PDF» أدناه.<br>2) يوقّع مدير المدرسة الورقة بخط اليد ويختمها بختم المدرسة الرسمي.<br>3) صوّر الورقة (صورة واضحة أو PDF، حتى 6 ملفات) وارفعها هنا.</p><input type="file" multiple accept="application/pdf,image/*" onchange="ctPaper(\''+id+'\',this)" style="'+fs+'">':(!mgr&&c.st=='pend'?'<p style="color:var(--mut)">تم الإرسال — بانتظار رد إدارة المنصة (اعتماد أو إرجاع).</p>':''))+'</div>';
   if(mgr&&u.plat&&c.st!='ok')act='<label style="'+lb+'">اسم المعتمِد</label><input id="ca_n" value="'+X(u.name||'')+'" style="'+fs+'"><label style="'+lb+'">الصفة</label><input id="ca_c" value="محرر العقود" style="'+fs+'"><label style="'+lb+'">سبب الإرجاع (عند الإرجاع فقط)</label><textarea id="ca_r" rows="2" style="'+fs+'"></textarea><div class="rw" style="margin:12px 0">'+bt('اعتماد العقد','ctAppr(\''+id+'\')',1)+bt('إرجاع للمدرسة','ctRet(\''+id+'\')')+'</div>';
   if(c.st=='ok'&&!mgr)act='<div class="rw" style="margin-bottom:12px">'+bt('إرسال النسخة المعتمدة بالبريد','ctSend(\''+id+'\')',1)+'</div>';
   let o=document.getElementById('ctpg');if(!o){o=document.createElement('div');o.id='ctpg';o.style.cssText='position:fixed;inset:0;z-index:100000;background:var(--bg);overflow:auto;padding:16px;box-sizing:border-box';document.body.appendChild(o)}
-  o.innerHTML='<div style="max-width:760px;margin:auto"><h2>عقد النشر على المتاجر</h2>'+(msg?'<div class="card" style="background:var(--green);color:#fff;font-weight:800;margin-top:8px">'+msg+'</div>':'')+'<div style="display:flex;gap:6px;margin:10px 0">'+steps+'</div><div class="card"><b style="color:'+s[1]+'">'+s[0]+'</b>'+(c.note?'<p>سبب الإرجاع: '+X(c.note)+'</p>':'')+(c.sent?'<small style="display:block;color:var(--mut)">أُرسلت النسخة: '+X(c.sent)+'</small>':'')+'</div><div class="card" style="margin-top:10px;font-size:13px;line-height:1.8">'+F.map(x=>'<b>'+x[1]+':</b> '+X(c.f[x[0]])).join('<br>')+'</div><div class="card" style="margin-top:10px;font-size:13px;line-height:1.8">'+body(k)+'</div>'+pp+'<div class="card" style="margin-top:10px">'+act+'<div class="rw">'+bt('حفظ PDF','ctPdf(\''+id+'\')',1)+bt('إغلاق','ctX()')+'</div></div></div>'};
- window.ctPaper=(id,i)=>{const c=getC(id),f=i.files[0];if(!c||!f)return;if(c.subAt||c.st!='pend'){i.value='';return alert('تم الإرسال، انتظر رد إدارة المنصة')}const e=(document.getElementById('cp_e').value||'').trim(),n=(document.getElementById('cp_n').value||'').trim();if(!e||!n){i.value='';return alert('اكتب اسم محرر العقود ورقم القيد أولاً')}
-  const ok=(d,nm)=>{c.paper={name:nm,ts:new Date().toISOString().slice(0,16).replace('T',' '),ed:e,no:n,data:d};try{lg('تعديل','الإعدادات','رفع النسخة الورقية للعقد '+c.id,'')}catch(x){}c.subAt=new Date().toISOString();try{pubPush(c.k,'review')}catch(x){}save();render();view(id,0,'تم الحفظ وإرسال البيانات إلى إدارة المنصة — بانتظار الاعتماد ثم النشر')};
-  if(f.type=='application/pdf'){if(f.size>1572864){i.value='';return alert('ملف PDF يجب أن يكون أقل من 1.5MB')}const r=new FileReader();r.onload=()=>ok(r.result,f.name);r.readAsDataURL(f)}
-  else if(/^image\//.test(f.type)){const im=new Image(),u=URL.createObjectURL(f);im.onload=()=>{const s=Math.min(1,1600/Math.max(im.width,im.height)),cv=document.createElement('canvas');cv.width=Math.round(im.width*s);cv.height=Math.round(im.height*s);cv.getContext('2d').drawImage(im,0,0,cv.width,cv.height);URL.revokeObjectURL(u);ok(cv.toDataURL('image/jpeg',.75),f.name.replace(/\.[^.]+$/,'')+'.jpg')};im.onerror=()=>alert('تعذّر قراءة الصورة');im.src=u}
-  else{i.value='';alert('الملف يجب أن يكون PDF أو صورة')}};
- window.ctPaperDl=id=>{const c=getC(id);if(!c||!c.paper)return;const a=document.createElement('a');a.href=c.paper.data;a.download=c.paper.name;a.click()};
+  o.innerHTML='<div style="max-width:760px;margin:auto"><h2>تفويض النشر على المتاجر</h2>'+(msg?'<div class="card" style="background:var(--green);color:#fff;font-weight:800;margin-top:8px">'+msg+'</div>':'')+'<div style="display:flex;gap:6px;margin:10px 0">'+steps+'</div><div class="card"><b style="color:'+s[1]+'">'+s[0]+'</b>'+(c.note?'<p>سبب الإرجاع: '+X(c.note)+'</p>':'')+(c.sent?'<small style="display:block;color:var(--mut)">أُرسلت النسخة: '+X(c.sent)+'</small>':'')+'</div><div class="card" style="margin-top:10px;font-size:13px;line-height:1.8">'+F.map(x=>'<b>'+x[1]+':</b> '+X(c.f[x[0]])).join('<br>')+'</div><div class="card" style="margin-top:10px;font-size:13px;line-height:1.8">'+body(k,c.f)+'</div>'+pp+'<div class="card" style="margin-top:10px">'+act+'<div class="rw">'+bt('حفظ PDF','ctPdf(\''+id+'\')',1)+bt('إغلاق','ctX()')+'</div></div></div>'};
+ window.ctPaper=(id,i)=>{const c=getC(id),fl=[...(i.files||[])].slice(0,6);if(!c||!fl.length)return;if((c.subAt&&c.st=='pend')||c.st=='ok'){i.value='';return alert('تم الإرسال، انتظر رد إدارة المنصة')}
+  const rd=f=>new Promise((res,rej)=>{
+   if(f.type=='application/pdf'){if(f.size>1572864)return rej('ملف PDF يجب أن يكون أقل من 1.5MB');const r=new FileReader();r.onload=()=>res({name:f.name,data:r.result});r.onerror=()=>rej('تعذّر قراءة الملف');r.readAsDataURL(f)}
+   else if(/^image\//.test(f.type)){const im=new Image(),u=URL.createObjectURL(f);im.onload=()=>{const k=Math.min(1,1600/Math.max(im.width,im.height)),cv=document.createElement('canvas');cv.width=Math.round(im.width*k);cv.height=Math.round(im.height*k);cv.getContext('2d').drawImage(im,0,0,cv.width,cv.height);URL.revokeObjectURL(u);res({name:f.name.replace(/\.[^.]+$/,'')+'.jpg',data:cv.toDataURL('image/jpeg',.75)})};im.onerror=()=>rej('تعذّر قراءة الصورة');im.src=u}
+   else rej('الملف يجب أن يكون PDF أو صورة')});
+  Promise.all(fl.map(rd)).then(pg=>{c.pages=pg;c.paper={name:pg.length>1?pg.length+' ملفات':pg[0].name,ts:new Date().toISOString().slice(0,16).replace('T',' '),ed:'',no:'',data:pg[0].data};
+   try{lg('تعديل','الإعدادات','رفع النسخة الموقّعة والمختومة للتفويض '+c.id,'')}catch(x){}
+   c.subAt=new Date().toISOString();if(c.st=='rej'){c.st='pend';delete c.note}try{pubPush(c.k,'review')}catch(x){}
+   save();render();view(id,0,'تم رفع صور الورقة الرسمية وإرسالها إلى إدارة المنصة — بانتظار الاعتماد ثم النشر')}).catch(m=>{i.value='';alert(m)})};
+ window.ctPaperDl=(id,n)=>{const c=getC(id);if(!c||!c.paper)return;const p=(c.pages||[c.paper])[n||0];if(!p)return;const a=document.createElement('a');a.href=p.data;a.download=p.name;a.click()};
  window.ctPage=(id,m)=>view(id,0,m);window.ctRev=id=>view(id,1);
  window.ctPdf=id=>{const c=getC(id);if(!c)return;const f=document.createElement('iframe');f.style.cssText='position:fixed;width:0;height:0;border:0';f.onload=()=>{try{f.contentWindow.focus();f.contentWindow.print()}catch(e){alert('تعذّر فتح الطباعة، نزّل HTML ثم اطبعه')}setTimeout(()=>f.remove(),60000)};f.srcdoc=doc(c);document.body.appendChild(f)};
- window.ctAppr=async id=>{const c=getC(id),u=me()||{};if(!c||!u.plat)return;if(!c.paper)return alert('لا يمكن الاعتماد قبل رفع النسخة الورقية المعتمدة (PDF أو صورة)');const n=(document.getElementById('ca_n').value||'').trim(),cp=(document.getElementById('ca_c').value||'').trim();if(!n||!cp)return alert('اكتب اسم المعتمِد وصفته');
+ window.ctAppr=async id=>{const c=getC(id),u=me()||{};if(!c||!u.plat)return;if(!c.paper)return alert('لا يمكن الاعتماد قبل رفع النسخة الموقّعة والمختومة');const n=(document.getElementById('ca_n').value||'').trim(),cp=(document.getElementById('ca_c').value||'').trim();if(!n||!cp)return alert('اكتب اسم المعتمِد وصفته');
   const ts=new Date().toISOString();c.appr={by:n,cap:cp,ts,hash:await hs(c.hash+n+cp+ts)};c.st='ok';delete c.note;try{lg('تعديل','الإعدادات','اعتماد عقد نشر '+c.id,'')}catch(e){}save();render();view(id,1)};
  window.ctRet=id=>{const c=getC(id),u=me()||{};if(!c||!u.plat)return;const n=(document.getElementById('ca_r').value||'').trim();if(!n)return alert('اكتب سبب الإرجاع');c.st='rej';c.note=n;{const R=cRq(rq(id));(db.pubReqs||[]).filter(x=>cRq(x)===R).forEach(x=>{try{window.pubSet(x.id,'rej')}catch(e){}})}save();render();view(id,1)};
  window.ctSend=id=>{const c=getC(id);if(!c||c.st!='ok')return;c.sent=new Date().toISOString().slice(0,16).replace('T',' ');save();
@@ -7835,9 +8147,10 @@ if(typeof window.render==='function'&&!window.render.__plx){var R0=window.render
  /* مدير المنصة: زر مراجعة العقد على كل طلب */
  {const v1=V.pubreqs,T='<div class="card" style="margin-top:12px">';
   V.pubreqs=()=>{const o=v1();return o.split(T).map((c,i)=>{if(!i)return c;const m=/pubSet\('([^']+)'/.exec(c),r=m&&(db.pubReqs||[]).find(x=>x.id==m[1]);
-   return T+(r&&cOf(r)?c.replace('justify-content:flex-end;flex-wrap:wrap">','justify-content:flex-end;flex-wrap:wrap"><button class="btn o" onclick="ctRev(\''+r.id+'\')">'+(cOf(r).st=='ok'?'العقد المعتمد':cOf(r).paper?'مراجعة العقد':'العقد — بانتظار النسخة الورقية')+'</button>'):c)}).join('')}}
+   return T+(r&&cOf(r)?c.replace('justify-content:flex-end;flex-wrap:wrap">','justify-content:flex-end;flex-wrap:wrap"><button class="btn o" onclick="ctRev(\''+r.id+'\')">'+(cOf(r).st=='ok'?'التفويض المعتمد':(cOf(r).paper?'مراجعة التفويض':'التفويض — بانتظار النسخة الموقّعة'))+'</button>'):c)}).join('')}}
  /* المدرسة: زر «العقد» في حالة النشر */
- {const p1=V.pubstat;V.pubstat=function(){let o=p1.apply(this,arguments);['play','ios'].forEach(k=>{const r=(db.pubReqs||[]).find(x=>x.school==schId()&&x.platform==k&&cOf(x));if(!r)return;const b='<button class="btn o" onclick="ctPage(\''+r.id+'\')">العقد</button>';
+ {try{const st=document.createElement('style');st.textContent='.btn.pbs,button[onclick^="pubCancel"]{font-size:12.5px!important;padding:8px 12px!important;white-space:nowrap;min-height:0!important;line-height:1.4;flex:0 0 auto;margin:0!important}div:has(>.btn.pbs),div:has(>button[onclick^="pubCancel"]){margin-top:22px!important}div:has(>.btn.pbs){gap:4px!important;flex-wrap:wrap;row-gap:4px}';document.head.appendChild(st)}catch(x){}
+  const p1=V.pubstat;V.pubstat=function(){let o=p1.apply(this,arguments);['play','ios'].forEach(k=>{const r=(db.pubReqs||[]).find(x=>x.school==schId()&&x.platform==k&&cOf(x));if(!r)return;const c0=cOf(r),up=(!c0.paper&&c0.st!='ok')||c0.st=='rej',b=(up?'<label class="btn pbs" style="background:var(--navy);color:#fff;box-shadow:none;cursor:pointer">رفع الورقة الموقّعة<input type="file" multiple accept="application/pdf,image/*" style="display:none" onchange="ctPaper(\''+r.id+'\',this)"></label>':'')+'<button class="btn o pbs" onclick="ctPage(\''+r.id+'\')">التفويض</button>';
    o=o.split('<button class="btn o" onclick="pubCancel(\''+k+'\')"').join(b+'<button class="btn o" onclick="pubCancel(\''+k+'\')"').split('<button class="btn" onclick="pubReq(\''+k+'\')"').join(b+'<button class="btn" onclick="pubReq(\''+k+'\')"')});return o}}
  {const C0=window.pubCancel;window.pubCancel=k=>{const r=(db.pubReqs||[]).find(x=>x.school==schId()&&x.platform==k&&cOf(x));if(r&&cOf(r).subAt&&cOf(r).st=='pend'&&r.status=='review')return alert('لا يمكن إلغاء الطلب بعد الإرسال حتى ترد إدارة المنصة');return C0(k)}}
  try{if(me())render()}catch(x){}
@@ -8039,6 +8352,37 @@ if(typeof window.render==='function'&&!window.render.__plx){var R0=window.render
  new MutationObserver(sch).observe(document.body,{childList:true,subtree:true});
 }catch(e){console.error('field order dom patch',e)}})();
 
+/* ===== ترتيب موحّد لمجموعات الأقسام: مصدر واحد للصفحة الرئيسية والقائمة الجانبية ===== */
+(function(){try{
+ var CG=[
+  ['إدارة المنصة','المدارس والباقات والنشر','schools',['schools','schpay','pubreqs','plans','platacc']],
+  ['الأشخاص','الطلاب والموظفون والفروع','students',['branches','students','accounts','guardians','staff','users']],
+  ['الدراسة','الفصول والدروس والدرجات','lessons',['levels','classes','subjects','assign','load','schedule','cal','lessons','homework','exams','grades']],
+  ['الحضور والإجازات','حضور الطلاب والموظفين','att',['att','sattend','leaves','absreq']],
+  ['المالية','الرسوم والإيصالات والرواتب','fees',['fees','inst','payments','expenses','closing','ledger','payroll','subs']],
+  ['المقصف','المقاصف والبطاقات والأصناف والمبيعات','canteens',['canteens','canteen','items','ctx']],
+  ['النقل المدرسي','الحافلات والاشتراكات','buses',['buses','transport']],
+  ['الزي','أصناف الزي وفواتير الطلاب','uniform',['uniform','uniitems']],
+  ['الكتب','الكتب المدرسية وصرفها للطلاب','books',['books','bkissue']],
+  ['التواصل','الإعلانات والرسائل والرحلات','news',['news','albums','notes','msgs','support','compl','meet','pickup','tafweed','trips']],
+  ['النظام','التقارير والشهادات والإعدادات','reports',['reports','certs','log','export','set','plan','pubstat']]
+ ];
+ var has=function(k){return NAV.some(function(n){return n[0]==k})};
+ var old={};GRPS.forEach(function(g){old[g[0]]=g});
+ var claimed={};CG.forEach(function(c){c[3].forEach(function(k){claimed[k]=1})});
+ var out=CG.map(function(c){var o=old[c[0]],g=o||[c[0],c[1],[],c[2]];
+  g[1]=c[1];
+  var keep=c[3].filter(has);
+  /* أي قسم كان في هذه المجموعة ولم يُذكر في أي مجموعة يبقى فيها في النهاية */
+  var extra=o?o[2].filter(function(k){return !claimed[k]&&has(k)}):[];
+  g[2]=keep.concat(extra);return g});
+ /* مجموعات أخرى قد تضيفها ميزات مستقبلية تبقى بعد المجموعات المعروفة */
+ GRPS.forEach(function(g){if(!CG.some(function(c){return c[0]==g[0]}))out.push(g)});
+ GRPS.length=0;out.forEach(function(g){GRPS.push(g)});
+ Object.keys(V).forEach(function(k){if(/^g_\d+$/.test(k))delete V[k]});
+ GRPS.forEach(function(g,i){V['g_'+i]=function(){return vGrp(i)}});
+try{if(typeof me==='function'&&me())render()}catch(e2){}
+}catch(e){console.error('groups order patch',e)}})();
 <\/script>
 <script>
 /* عند التنقل بين الصفحات: ارجع لأعلى الصفحة كي لا يختفي زر رجوع تحت الشريط العلوي الثابت */
@@ -8053,6 +8397,78 @@ function openAdmin(){try{
  const html=document.getElementById('adminSrc').textContent.split('<\\/script').join('</script').replace(/^\s+/,''),f=document.createElement('iframe');f.id='adminFrame';f.srcdoc=html;
  f.style.cssText='position:fixed;inset:0;width:100%;height:100%;border:0;z-index:99999;background:#fff';
  const lg=document.getElementById('lg');if(lg)lg.classList.add('off');document.body.appendChild(f)}catch(e){location.href=ADMIN_URL}}
+</script>
+<script>
+/* ===== مزامنة الحضور والغياب: طابور محلي + إرسال دفعات ===== */
+(function(){try{
+var LS=null;try{LS=window.localStorage;LS.getItem('_t')}catch(e){LS=null}
+if(!LS||!window.Storage||typeof fetch!=='function'){return} /* بيئة بلا تخزين (معاينة مقيّدة): لا نفعل شيئًا */
+var CFG=window.SYNC_CFG=Object.assign({
+  url:'',            /* رابط Supabase مثل https://xxxx.supabase.co */
+  key:'',            /* مفتاح anon العام */
+  table:'attendance',
+  interval:60000,    /* كل دقيقة */
+  batch:200          /* أقصى عدد سجلات في الدفعة */
+},window.SYNC_CFG||{});
+var QK='iqra_sync_q_v1',SK='iqra_sync_snap_v1',seq=Date.now(),busy=false,fails=0,timer=null;
+function rd(k,d){try{var v=LS.getItem(k);return v?JSON.parse(v):d}catch(e){return d}}
+function wr(k,v){try{_set.call(LS,k,JSON.stringify(v));return true}catch(e){return false}}
+function school(){try{return (typeof pubCode==='function'&&pubCode())||''}catch(e){return ''}}
+function flat(att){var o={};Object.keys(att||{}).forEach(function(d){var day=att[d]||{};Object.keys(day).forEach(function(id){o[d+'|'+id]=day[id]})});return o}
+function enqueue(newAtt){
+  var prev=rd(SK,{}),cur=flat(newAtt),q=rd(QK,{});
+  var t=Date.now(),ch=0;
+  Object.keys(cur).forEach(function(k){
+    var a=JSON.stringify(cur[k]);
+    if(JSON.stringify(prev[k])!==a){var p=k.split('|'),r=cur[k];
+      q[k]={rec_key:k,school:school(),att_date:p[0],student_id:p[1],status:r.s||null,time_in:r.in||null,time_out:r.out||null,deleted:false,updated_at:new Date(t).toISOString(),_v:++seq};ch=1}
+  });
+  Object.keys(prev).forEach(function(k){
+    if(!(k in cur)){var p=k.split('|');
+      q[k]={rec_key:k,school:school(),att_date:p[0],student_id:p[1],status:null,time_in:null,time_out:null,deleted:true,updated_at:new Date(t).toISOString(),_v:++seq};ch=1}
+  });
+  wr(SK,cur);if(ch)wr(QK,q);
+}
+var _set=Storage.prototype.setItem;
+if(rd(SK,null)===null)wr(SK,flat(rd('att',{}))); /* أول تشغيل: القديم لا يُرسَل */
+/* التقاط أي تغيير في سجل الحضور دون المساس بباقي الكود */
+Storage.prototype.setItem=function(k,v){
+  _set.apply(this,arguments);
+  try{if(k==='att'&&this===LS){enqueue(JSON.parse(v))}}catch(e){}
+};
+function pending(){return Object.keys(rd(QK,{})).length}
+function flush(unload){
+  if(busy||!CFG.url||!CFG.key)return Promise.resolve(false);
+  if(navigator.onLine===false)return Promise.resolve(false);
+  var q=rd(QK,{}),keys=Object.keys(q).slice(0,CFG.batch);
+  if(!keys.length)return Promise.resolve(true);
+  var rows=keys.map(function(k){var r=Object.assign({},q[k]);delete r._v;return r}),vers={};
+  keys.forEach(function(k){vers[k]=q[k]._v});
+  busy=true;
+  return fetch(CFG.url.replace(/\/$/,'')+'/rest/v1/'+CFG.table+'?on_conflict=rec_key',{
+    method:'POST',keepalive:!!unload,
+    headers:{'Content-Type':'application/json',apikey:CFG.key,Authorization:'Bearer '+CFG.key,Prefer:'resolution=merge-duplicates,return=minimal'},
+    body:JSON.stringify(rows)
+  }).then(function(res){
+    if(!res.ok)throw new Error('HTTP '+res.status);
+    var now=rd(QK,{});
+    keys.forEach(function(k){if(now[k]&&now[k]._v===vers[k])delete now[k]}); /* نحذف ما أُرسل فقط */
+    wr(QK,now);fails=0;busy=false;
+    if(Object.keys(now).length&&!unload)return flush();
+    return true;
+  }).catch(function(){busy=false;fails++;return false});
+}
+function loop(){
+  clearTimeout(timer);
+  var wait=Math.min(CFG.interval*Math.pow(2,Math.min(fails,3)),300000); /* تراجع تدريجي عند الفشل */
+  timer=setTimeout(function(){flush().then(loop)},wait);
+}
+window.addEventListener('online',function(){fails=0;flush()});
+document.addEventListener('visibilitychange',function(){if(document.visibilityState==='hidden')flush(true)});
+window.addEventListener('pagehide',function(){flush(true)});
+window.IqraSync={flush:flush,pending:pending,cfg:CFG};
+loop();
+}catch(e){try{console.warn('sync disabled',e)}catch(_){}}})();
 </script>
 <script>if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol)){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){})})}</script>
 
@@ -8139,6 +8555,30 @@ document.addEventListener('click',function(ev){var b=ev.target.closest&&ev.targe
  else if(a=='pay')paySheet(p)});
 var os=start;start=function(){var r=os.apply(this,arguments);try{drawTrips()}catch(e){}return r};
 var og=go;go=function(id){var r=og.apply(this,arguments);if(id=='home'){try{drawTrips()}catch(e){}}return r};
+})();
+</script>
+<script>
+/* الشكاوى والاقتراحات — صفحة ولي الأمر الرئيسية */
+(function(){
+function me(d){try{return cur&&/^a_/.test(cur.id)?(d.students||[]).find(function(x){return 'a_'+x.id==cur.id}):null}catch(e){return null}}
+function draw(){var t=document.getElementById('trp');if(!t)return;var e=document.getElementById('cmp');if(!e){e=document.createElement('div');e.id='cmp';t.parentNode.insertBefore(e,t.nextSibling)}
+ var d=adb(),s=d&&me(d);if(!s){e.innerHTML='';return}
+ var L=(d.compl||[]).filter(function(r){return String(r.student)==String(s.id)}).sort(function(a,b){return(b.ts||0)-(a.ts||0)}).slice(0,3);
+ e.innerHTML='<div class="trc"><div class="trh"><span><b>الشكاوى والاقتراحات</b><small>رأيك يصل مباشرة لإدارة المدرسة</small></span></div>'+
+  L.map(function(r){return'<div class="trb"><b>'+escH(r.type||'شكوى')+' · '+escH(r.st||'جديدة')+'</b><br>'+escH(r.text)+(r.reply?'<br><small>رد الإدارة: '+escH(r.reply)+'</small>':'')+'</div>'}).join('')+
+  '<div class="tra"><button class="y" data-cp="new">إرسال شكوى أو اقتراح</button></div></div>'}
+function sheet(){var o=document.getElementById('tpay');if(o)o.remove();o=document.createElement('div');o.id='tpay';
+ o.innerHTML='<div class="tps"><h3>شكوى أو اقتراح</h3><select id="cp_t" style="width:100%;margin:8px 0"><option>شكوى</option><option>اقتراح</option></select><textarea id="cp_x" rows="5" placeholder="اكتب رسالتك" style="width:100%"></textarea><div class="tra"><button class="y" data-cp="send">إرسال</button><button class="n" data-cp="x">إلغاء</button></div></div>';
+ o.onclick=function(ev){if(ev.target===o)o.remove()};document.body.appendChild(o)}
+document.addEventListener('click',function(ev){var b=ev.target.closest&&ev.target.closest('[data-cp]');if(!b)return;var a=b.dataset.cp;
+ if(a=='new')sheet();else if(a=='x'){var o=document.getElementById('tpay');if(o)o.remove()}
+ else if(a=='send'){var x=document.getElementById('cp_x').value.trim();if(!x){tmsg('اكتب رسالتك أولاً');return}
+  var d=adb(),s=d&&me(d);if(!s)return;d.compl=d.compl||[];
+  d.compl.push({id:'cp'+Date.now().toString(36),student:s.id,by:(PAR&&PAR.n)||'ولي أمر',branch:s.branch||'',type:document.getElementById('cp_t').value,text:x,st:'جديدة',ts:Date.now()});
+  try{localStorage.setItem(ADMIN_KEY,JSON.stringify(d))}catch(e){tmsg('تعذّر الإرسال');return}
+  document.getElementById('tpay').remove();tmsg('تم إرسال رسالتك ✓',1);draw()}});
+var os=start;start=function(){var r=os.apply(this,arguments);try{draw()}catch(e){}return r};
+var og=go;go=function(id){var r=og.apply(this,arguments);if(id=='home'){try{draw()}catch(e){}}return r};
 })();
 </script>
 <script>/* QR generator — qrcode-generator (c) 2009 Kazuhiko Arase, MIT License */
@@ -9388,21 +9828,42 @@ var C={
   sm:function(r){return fd(r.date)+' · '+r.time+(r.with?' · '+r.with:'')}},
  pku:{key:'pickup',t:'إذن خروج / استلام',sub:'خروج مبكر أو استلام بشخص آخر',pre:'pk',ic:'<path d="M5 20V5h9v15M14 12h6M17 9l3 3-3 3"/>',
   F:[['type','نوع الطلب','select',['خروج مبكر','استلام بواسطة شخص آخر']],['date','التاريخ','date'],['time','وقت الخروج','time'],['who','اسم المستلم (إن كان شخصاً آخر)','text'],['phone','هاتف المستلم','tel'],['uid','رقم هوية المستلم','text'],['reason','السبب','textarea']],R:['date','time','reason'],
-  sm:function(r){return (r.type||'')+' · '+fd(r.date)+' '+r.time+(r.who?' · المستلم: '+r.who:'')}}
-},S={mtg:{v:{}},pku:{v:{}}};
+  sm:function(r){return (r.type||'')+' · '+fd(r.date)+' '+r.time+(r.who?' · المستلم: '+r.who:'')}},
+ tfz:{key:'tafweed',t:'المفوَّضون بالاستلام',sub:'أشخاص مصرّح لهم باستلام الطالب بشكل دائم',pre:'tf',ic:'<path d="M12 3l8 3v5c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6zM9 12l2 2 4-4"/>',
+  F:[['name','اسم المفوَّض','text'],['rel','صلة القرابة','select',['أب','أم','أخ','أخت','عم','خال','جد','جدة','سائق','أخرى']],['phone','هاتف المفوَّض','tel'],['uid','رقم هوية المفوَّض','text'],['until','ساري حتى (اختياري)','date']],R:['name','phone','uid'],
+  sm:function(r){return (r.name||'')+' · '+(r.rel||'')+(r.until?' · حتى '+fd(r.until):'')}}
+},S={mtg:{v:{}},pku:{v:{}},tfz:{v:{}},pkl:{v:{},kid:'all'}};
 function fd(d){try{return new Date(d+'T00:00:00').toLocaleDateString('ar-LY',{day:'numeric',month:'long'})}catch(e){return d||''}}
 function tdy(){var n=new Date();return n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0')+'-'+String(n.getDate()).padStart(2,'0')}
 function ks(){return PAR?PAR.kids.map(function(i){return U.find(function(x){return x.id==i})}).filter(Boolean):[]}
 function nm(n){return String(n||'').trim().split(/\s+/).slice(0,2).join(' ')}
 function sv(d){try{localStorage.setItem(ADMIN_KEY,JSON.stringify(d));return true}catch(e){tmsg('تعذّر الحفظ');return false}}
-function dr(id){var c=C[id],e=document.getElementById('spq');if(!e)return;
+function ymd(t){var n=new Date(t);return n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0')+'-'+String(n.getDate()).padStart(2,'0')}
+function hm(t){var n=new Date(t);return String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0')}
+function drLog(e){
+ if(!PAR){e.innerHTML='<div class="card"><h2>سجل الاستلام</h2><p class="arq-h">هذه الخدمة متاحة لحسابات أولياء الأمور فقط.</p></div>';tb('pkl');return}
+ var K=ks();if(!K.length)return;var s=S.pkl,d=adb()||{};
+ var ids=K.map(function(k){return String(k.id).replace(/^a_/,'')});
+ if(s.kid!='all'&&!K.some(function(k){return k.id==s.kid}))s.kid='all';
+ var L=[];
+ (d.tfLog||[]).forEach(function(x){L.push({student:x.student,ts:x.ts||0,date:x.date,time:x.time||'',who:x.who,rel:x.rel,by:x.by,src:'مفوَّض'})});
+ (d.pickup||[]).forEach(function(p){if(p.st=='مستخدم'&&p.uat)L.push({student:p.student,ts:p.uat,date:ymd(p.uat),time:hm(p.uat),who:p.uby||p.who,rel:p.type,by:p.ubb||'',src:'إذن'})});
+ L=L.filter(function(r){var sid=String(r.student);return s.kid=='all'?ids.indexOf(sid)>=0:sid==String(s.kid).replace(/^a_/,'')}).sort(function(a,b){return(b.ts||0)-(a.ts||0)}).slice(0,100);
+ var T=tdy(),td=L.filter(function(r){return r.date==T});
+ var kn=function(sid){var k=K.find(function(x){return String(x.id).replace(/^a_/,'')==String(sid)});return k?nm(k.n):''};
+ var chips='<button type="button" data-q="pkl|k|all" class="'+(s.kid=='all'?'on':'')+'">الكل</button>'+K.map(function(k){return '<button type="button" data-q="pkl|k|'+escH(k.id)+'" class="'+(k.id==s.kid?'on':'')+'">'+escH(nm(k.n))+'</button>'}).join('');
+ var ban=td.length?'<div class="card" style="border:1px solid var(--green)"><h2 style="color:var(--green)">تم التسليم اليوم</h2>'+td.map(function(r){return '<p style="margin:4px 0"><b>'+escH(kn(r.student))+'</b> سُلّم إلى '+escH(r.who||'—')+(r.rel?' ('+escH(r.rel)+')':'')+' الساعة '+escH(r.time)+'</p>'}).join('')+'</div>':'';
+ var list=L.length?L.map(function(r){var t=r.date==T;
+  return '<div class="arq-i"><div><b>'+escH(kn(r.student))+'</b><small>سُلّم إلى: '+escH(r.who||'—')+(r.rel?' · '+escH(r.rel):'')+'</small><small>'+escH(fd(r.date))+' · '+escH(r.time)+(r.by?' · سجّله: '+escH(r.by):'')+'</small></div><span class="arq-s '+(t?'y':'p')+'">'+(t?'اليوم':(r.src=='إذن'?'إذن خروج':'مفوَّض'))+'</span></div>'}).join(''):'<p class="arq-h" style="margin:0">لا توجد عمليات استلام مسجّلة</p>';
+ e.innerHTML=ban+'<div class="card"><h2>سجل الاستلام</h2><p class="arq-h">كل مرة يُسلَّم فيها طفلك لشخص من البوابة: من استلمه، ومتى، ومن سجّل التسليم.</p><div class="arq-k">'+chips+'</div></div><div class="card"><h2>آخر العمليات</h2>'+list+'</div>';tb('pkl')}
+function dr(id){if(id=='pkl'){var e0=document.getElementById('spq');if(e0)drLog(e0);return}var c=C[id],e=document.getElementById('spq');if(!e)return;
  if(!PAR){e.innerHTML='<div class="card"><h2>'+c.t+'</h2><p class="arq-h">هذه الخدمة متاحة لحسابات أولياء الأمور فقط.</p></div>';return}
  var K=ks();if(!K.length)return;var s=S[id],d=adb()||{};
  if(!s.kid||!K.some(function(k){return k.id==s.kid}))s.kid=(cur&&K.some(function(k){return k.id==cur.id})?cur.id:K[0].id);
  var ids=K.map(function(k){return String(k.id).replace(/^a_/,'')});
  var L=(d[c.key]||[]).filter(function(r){return ids.indexOf(String(r.student))>=0}).sort(function(a,b){return(b.ts||0)-(a.ts||0)});
- var list=L.length?L.map(function(r){var k=K.find(function(x){return String(x.id).replace(/^a_/,'')==String(r.student)}),st=r.st||'قيد المراجعة',cl=st=='مقبول'?'y':st=='مرفوض'?'n':'p';
-  return '<div class="arq-i"><div><b>'+escH(k?nm(k.n):'')+'</b><small>'+escH(c.sm(r))+'</small><p>'+escH(r.reason||'')+'</p>'+qb(r,st)+(st=='قيد المراجعة'?'<button type="button" class="arq-x" data-q="'+id+'|x|'+escH(r.id)+'">إلغاء الطلب</button>':'')+'</div><span class="arq-s '+cl+'">'+escH(st)+'</span></div>'}).join(''):'<p class="arq-h" style="margin:0">لا توجد طلبات سابقة</p>';
+ var list=L.length?L.map(function(r){var k=K.find(function(x){return String(x.id).replace(/^a_/,'')==String(r.student)}),st=r.st||'قيد المراجعة',cl=st=='مقبول'?'y':(st=='مرفوض'||st=='موقوف')?'n':'p';
+  return '<div class="arq-i"><div><b>'+escH(k?nm(k.n):'')+'</b><small>'+escH(c.sm(r))+'</small><p>'+escH(r.reason||'')+'</p>'+qb(r,st)+tfb(id,r,st)+(st=='قيد المراجعة'?'<button type="button" class="arq-x" data-q="'+id+'|x|'+escH(r.id)+'">إلغاء الطلب</button>':'')+'</div><span class="arq-s '+cl+'">'+escH(st)+'</span></div>'}).join(''):'<p class="arq-h" style="margin:0">لا توجد طلبات سابقة</p>';
  var chips=K.map(function(k){return '<button type="button" data-q="'+id+'|k|'+escH(k.id)+'" class="'+(k.id==s.kid?'on':'')+'">'+escH(nm(k.n))+'</button>'}).join('');
  var W=['الإدارة / أي معلم'].concat((d.staff||[]).map(function(x){return x.name}).filter(Boolean));
  var fm=c.F.map(function(f){if(s.v[f[0]]==null&&f[2]!='select')s.v[f[0]]=(f[0]=='date'?tdy():f[2]=='time'?'08:00':'');var v=s.v[f[0]],h='<label>'+f[1]+'</label>',a=' data-qf="'+id+'|'+f[0]+'"';
@@ -9411,25 +9872,35 @@ function dr(id){var c=C[id],e=document.getElementById('spq');if(!e)return;
   else h+='<input type="'+f[2]+'"'+a+' value="'+escH(v)+'">';return h}).join('');
  e.innerHTML='<div class="card"><h2>'+c.t+'</h2><p class="arq-h">'+c.sub+'، وتصلك الإجابة هنا.</p><button type="button" class="arq-t'+(s.open?' on':'')+'" data-q="'+id+'|o|"><i><svg viewBox="0 0 24 24"><rect x="4" y="3.5" width="16" height="17" rx="3"/><path d="M12 9v6M9 12h6"/></svg></i><b>طلب جديد</b><em><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></em></button>'+(s.open?'<div class="arq-f"><label>الطالب</label><div class="arq-k">'+chips+'</div>'+fm+'<button type="button" class="arq-send" data-q="'+id+'|s|">إرسال الطلب</button></div>':'')+'</div>'+(s.open?'':'<div class="card"><h2>طلباتي</h2>'+list+'</div>');tb(id)}
 var SUB='sup';
-function tb(a){var e=document.getElementById('spq');if(!e)return;e.insertAdjacentHTML('afterbegin','<div class="card"><div class="arq-k">'+[['sup','الدعم الفني'],['mtg','حجز مقابلة'],['pku','إذن خروج / استلام']].map(function(x){return '<button type="button" data-st="'+x[0]+'" class="'+(x[0]==a?'on':'')+'">'+x[1]+'</button>'}).join('')+'</div></div>')}
+function tb(a){var e=document.getElementById('spq');if(!e)return;e.insertAdjacentHTML('afterbegin','<div class="card"><div class="arq-k">'+[['sup','الدعم الفني'],['mtg','حجز مقابلة'],['pku','إذن خروج / استلام'],['tfz','المفوَّضون'],['pkl','سجل الاستلام']].map(function(x){return '<button type="button" data-st="'+x[0]+'" class="'+(x[0]==a?'on':'')+'">'+x[1]+'</button>'}).join('')+'</div></div>')}
 var D0=window.drawSup;window.drawSup=function(){if(SUB!='sup'){dr(SUB);return}var r=D0.apply(this,arguments);tb('sup');return r};
 document.addEventListener('click',function(ev){var b=ev.target.closest&&ev.target.closest('[data-st]');if(!b)return;SUB=b.getAttribute('data-st');window.drawSup()});
+function tfb(id,r,st){if(id!='tfz')return '';
+ if(st=='مقبول')return '<button type="button" class="arq-x" data-q="tfz|p|'+escH(r.id)+'">إيقاف التفويض</button>';
+ if(st=='موقوف'&&r.sby=='parent')return '<button type="button" class="arq-x" data-q="tfz|r|'+escH(r.id)+'">إعادة تفعيل التفويض</button>';
+ return ''}
 function qb(r,st){if(!r.code||!window.__QR)return '';
  if(st=='مقبول')return '<button type="button" class="pkq-btn" data-pkq="'+escH(r.code)+'"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 14h3v3M21 14v.01M14 21h3M21 17v4"/></svg>عرض رمز الاستلام</button>';
- return '<small style="display:block;color:var(--mut);margin-top:8px">'+(st=='مستخدم'?'تم استخدام رمز الاستلام'+(r.uby?' — سُجّل بواسطة '+escH(r.uby):''):st=='مرفوض'?'الطلب مرفوض — لا يوجد رمز استلام':'يظهر رمز الاستلام بعد موافقة الإدارة')+'</small>'}
+ return '<small style="display:block;color:var(--mut);margin-top:8px">'+(st=='مستخدم'?'تم استخدام رمز الاستلام'+(r.uby?' — سُجّل بواسطة '+escH(r.uby):''):st=='موقوف'?(r.sby=='parent'?'أوقفتَ هذا التفويض — يمكنك إعادة تفعيله':'تم إيقاف هذا التفويض من الإدارة'):st=='مرفوض'?'الطلب مرفوض — لا يوجد رمز استلام':'يظهر رمز الاستلام بعد موافقة الإدارة')+'</small>'}
 (function(){var css=document.createElement('style');css.textContent='.pkq-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:10px;padding:12px;border:0;border-radius:14px;background:#2f3a49;color:#fff;font:800 15px/1 inherit;font-family:inherit;cursor:pointer}.pkq-pg{position:fixed;inset:0;z-index:99999;background:var(--bg,#f3f6f6);display:flex;flex-direction:column;overflow:auto;direction:rtl;font-family:inherit}.pkq-top{display:flex;align-items:center;gap:10px;padding:max(14px,env(safe-area-inset-top)) 16px 14px;background:#fff;border-bottom:1px solid var(--line,#e3e8e8)}.pkq-top button{width:42px;height:42px;border-radius:50%;border:1px solid var(--line,#e3e8e8);background:#fff;font-size:22px;cursor:pointer}.pkq-top b{font-size:18px}.pkq-bd{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px 20px;text-align:center}.pkq-box{width:min(78vw,320px);background:#fff;border:1px solid var(--line,#e3e8e8);border-radius:20px;padding:14px;box-shadow:0 8px 30px rgba(0,0,0,.08)}.pkq-cd{direction:ltr;letter-spacing:4px;font-size:26px;font-weight:800}.pkq-bd small{color:var(--mut,#6b7480);font-size:14px}';document.head.appendChild(css);
  document.addEventListener('click',function(ev){var b=ev.target.closest&&ev.target.closest('[data-pkq]');if(!b||!window.__QR)return;var c=b.getAttribute('data-pkq');
-  var o=document.createElement('div');o.className='pkq-pg';o.innerHTML='<div class="pkq-top"><button type="button" class="pkq-x" aria-label="رجوع">✕</button><b>رمز الاستلام</b></div><div class="pkq-bd"><div class="pkq-box">'+window.__QR('IQRA-PK:'+c)+'</div><div class="pkq-cd"></div><small>اعرض هذا الرمز عند استلام الطالب</small></div>';
+  var o=document.createElement('div');o.className='pkq-pg';o.innerHTML='<div class="pkq-top"><button type="button" class="pkq-x" aria-label="رجوع">✕</button><b>رمز الاستلام</b></div><div class="pkq-bd"><div class="pkq-box">'+window.__QR((/^TF-/.test(c)?'IQRA-TF:':'IQRA-PK:')+c)+'</div><div class="pkq-cd"></div><small>اعرض هذا الرمز عند استلام الطالب</small></div>';
   o.querySelector('.pkq-cd').textContent=c;var cl=function(){o.remove();document.body.style.overflow=''};o.querySelector('.pkq-x').addEventListener('click',cl);document.body.appendChild(o);document.body.style.overflow='hidden'})})();
-function gen(d){var A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',c;do{c='PK-';for(var i=0;i<6;i++)c+=A[Math.floor(Math.random()*A.length)]}while((d.pickup||[]).some(function(x){return x.code==c}));return c}
+function gen(d,p,k){p=p||'PK-';k=k||'pickup';var A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',c;do{c=p;for(var i=0;i<6;i++)c+=A[Math.floor(Math.random()*A.length)]}while((d[k]||[]).some(function(x){return x.code==c}));return c}
 function send(id){var c=C[id],s=S[id],d=adb(),v=s.v;if(!d||!/^a_/.test(String(s.kid))){tmsg('تعذّر إرسال الطلب');return}
  for(var i=0;i<c.R.length;i++)if(!String(v[c.R[i]]||'').trim()){tmsg('أكمل الحقول المطلوبة');return}
  var sid=String(s.kid).replace(/^a_/,''),st=(d.students||[]).find(function(x){return String(x.id)==sid});if(!st){tmsg('تعذّر إيجاد الطالب');return}
  var r={id:c.pre+Date.now().toString(36)+Math.random().toString(36).slice(2,5),student:st.id,st:'قيد المراجعة',by:(PAR&&PAR.n)||'ولي أمر',ts:Date.now(),branch:st.branch||'',grade:st.grade||'',cls:st.cls||''};
- c.F.forEach(function(f){r[f[0]]=String(v[f[0]]||'').slice(0,300)});if(id=='pku')r.code=gen(d);
+ c.F.forEach(function(f){r[f[0]]=String(v[f[0]]||'').slice(0,300)});if(id=='pku')r.code=gen(d);if(id=='tfz'){r.uid=String(r.uid).replace(/[٠-٩]/g,function(c){return c.charCodeAt(0)-1632}).trim();if((d.tafweed||[]).some(function(x){return String(x.student)==String(st.id)&&String(x.uid||'')==r.uid&&x.st!='مرفوض'})){tmsg('هذا المفوَّض مسجّل مسبقاً لهذا الطالب');return}r.code=gen(d,'TF-','tafweed')}
  (d[c.key]=d[c.key]||[]).push(r);if(!sv(d))return;s.v={};s.open=false;tmsg('تم إرسال الطلب للإدارة ✓',1);dr(id)}
 document.addEventListener('click',function(ev){var b=ev.target.closest&&ev.target.closest('[data-q]');if(!b)return;var p=b.getAttribute('data-q').split('|'),id=p[0];
  if(p[1]=='o'){S[id].open=!S[id].open;dr(id)}else if(p[1]=='k'){S[id].kid=p[2];dr(id)}else if(p[1]=='s')send(id);
+ else if(id=='tfz'&&(p[1]=='p'||p[1]=='r')){var dd=adb();if(!dd||!dd.tafweed)return;var rr=dd.tafweed.find(function(x){return x.id==p[2]});if(!rr)return;
+  var own=ks().map(function(q){return String(q.id).replace(/^a_/,'')});if(own.indexOf(String(rr.student))<0)return;
+  if(p[1]=='p'){if(rr.st!='مقبول'){dr(id);return}if(!confirm('إيقاف هذا التفويض؟ لن يُسمح لهذا الشخص باستلام الطالب إلى أن تعيد تفعيله.'))return;rr.st='موقوف';rr.sby='parent'}
+  else{if(rr.st!='موقوف'||rr.sby!='parent'){tmsg('لا يمكن إعادة التفعيل — تواصل مع الإدارة');dr(id);return}rr.st='مقبول';rr.sby=''}
+  rr.dt=Date.now();(dd.log=dd.log||[]).unshift({t:new Date().toISOString(),u:'ولي أمر: '+((PAR&&PAR.n)||''),a:'تعديل',s:'المفوَّضون بالاستلام',d:(p[1]=='p'?'إيقاف تفويض: ':'إعادة تفعيل: ')+(rr.name||''),br:rr.branch||''});
+  if(sv(dd)){tmsg(p[1]=='p'?'تم إيقاف التفويض ✓':'تمت إعادة التفعيل ✓',1);dr(id)}}
  else if(p[1]=='x'){if(!confirm('إلغاء هذا الطلب؟'))return;var d=adb(),k=C[id].key;if(!d||!d[k])return;var r=d[k].find(function(x){return x.id==p[2]});if(!r||(r.st||'قيد المراجعة')!='قيد المراجعة'){tmsg('لا يمكن إلغاء طلب تمت مراجعته');dr(id);return}d[k]=d[k].filter(function(x){return x.id!=p[2]});sv(d);dr(id)}});
 function inp(ev){var t=ev.target;if(!t||!t.getAttribute)return;var q=t.getAttribute('data-qf');if(!q)return;var p=q.split('|');S[p[0]].v[p[1]]=t.value}
 document.addEventListener('input',inp);document.addEventListener('change',inp);
@@ -9453,89 +9924,26 @@ var g0=window.go;window.go=function(id){var r=g0.apply(this,arguments);try{if(id
 var sl=document.createElement('style');sl.textContent='.arq-f select{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:12px;background:var(--bg);color:var(--ink);font:inherit;font-size:15px}.arq-f input[type=time]{-webkit-appearance:none;appearance:none;display:block;height:50px;text-align:start}@supports(-webkit-touch-callout:none){input,select,textarea{font-size:16px!important}}.arq-f input[type=time]{direction:ltr;text-align:right}';document.head.appendChild(sl);
 })();
 </script>
-<style id="prv-css">
-#prv{position:fixed;inset:0;z-index:100001;background:var(--bg);color:var(--ink);display:none;flex-direction:column;font-family:inherit}
-#prv.on{display:flex}
-#prv{width:100%;max-width:100vw;overflow:hidden;touch-action:pan-y;overscroll-behavior:contain}
-#prv .pb{overflow-x:hidden!important;overflow-y:auto;touch-action:pan-y;overscroll-behavior-x:none;width:100%;box-sizing:border-box}
-#prv .pb *{max-width:100%;box-sizing:border-box;overflow-wrap:anywhere;word-break:normal}
-#prv .pb .in{width:100%;min-width:0}
-#prv .pb table{table-layout:fixed;min-width:0!important;width:100%!important;max-width:100%!important}
-#prv .pb th,#prv .pb td{min-width:0!important;width:auto}
-#prv .pb th:first-child,#prv .pb td:first-child{width:32%!important}
-#prv .ph{display:flex;align-items:center;gap:10px;padding:calc(12px + env(safe-area-inset-top)) 14px 12px;background:var(--navy);color:#fff}
-#prv .ph b{font-size:17px;flex:1}
-#prv .ph button{background:#ffffff1f;border:0;color:#fff;width:38px;height:38px;border-radius:12px;font:inherit;font-size:20px;cursor:pointer}
-#prv .pb{flex:1;overflow-y:auto;padding:16px 16px calc(28px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch;line-height:1.95;font-size:14.5px}
-#prv .pb .in{max-width:760px;margin:auto}
-#prv .pb .lead{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px 16px;margin-bottom:14px}
-#prv .pb .lead small{color:var(--mut);display:block;font-weight:600}
-#prv .pb h3{margin:20px 0 6px;font-size:16px;color:var(--green);display:flex;gap:8px;align-items:center}
-#prv .pb h3 i{font-style:normal;background:var(--green);color:#fff;border-radius:8px;min-width:26px;height:26px;display:inline-grid;place-items:center;font-size:13px}
-#prv .pb p{margin:4px 0}
-#prv .pb ul{margin:4px 0;padding-inline-start:22px}
-#prv .pb li{margin:3px 0}
-#prv .pb .note{background:var(--card);border:1px solid var(--line);border-inline-start:4px solid var(--green);border-radius:12px;padding:10px 14px;margin:10px 0}
-#prv .pb table{width:100%;border-collapse:collapse;margin:8px 0;background:var(--card);border-radius:12px;overflow:hidden;font-size:13.5px}
-#prv .pb th,#prv .pb td{border:1px solid var(--line);padding:8px 10px;text-align:start;vertical-align:top}
-#prv .pb th{background:var(--bg);color:var(--mut)}
-.prv-lnk{display:block;margin:14px auto 0;background:none;border:0;color:var(--mut);font:inherit;font-size:13px;font-weight:700;text-decoration:underline;cursor:pointer}
-</style>
-<script>
-/* سياسة الخصوصية — توضح للمدارس المنضمة للمنصة كيفية التعامل مع البيانات */
-(function(){
-var PLAT='منصة المدارس الذكية',SCH='مدرسة اقرأ للإبداع العلمي',UPD='28 أكتوبر 2026';
-var sec=[
-['نبذة وتعريفات',`<p>توضّح هذه السياسة كيف تتعامل ${PLAT} («المنصة» أو «نحن») مع البيانات عند انضمام أي مدرسة إليها، وما يترتب على ذلك من التزامات علينا وعلى المدرسة. وتسري على كل مستخدمي المنصة: الإدارة، والمعلمين، والطلاب، وأولياء الأمور.</p>
-<ul><li><b>المدرسة:</b> الجهة التعليمية المنضمة إلى المنصة (مثل ${SCH}).</li><li><b>مزوّد المنصة:</b> الجهة التي تطوّر المنصة وتشغّلها وتستضيفها تقنياً.</li><li><b>بيانات المدرسة:</b> كل ما تُدخله المدرسة أو مستخدموها في المنصة.</li></ul>`],
-['من يملك البيانات ومن يديرها',`<div class="note">بيانات المدرسة ملك للمدرسة. تعمل المنصة بصفة «جهة معالِجة» تُشغّل البيانات نيابةً عن المدرسة وبحسب تعليماتها، وتبقى المدرسة هي «الجهة المتحكّمة» في بيانات طلابها وموظفيها وأولياء أمورها.</div>
-<p>لا نبيع بيانات المدرسة، ولا نؤجّرها، ولا نستخدمها في الإعلانات، ولا نشاركها مع مدرسة أخرى.</p>`],
-['البيانات التي تُعالَج على المنصة',`<table><tr><th>الفئة</th><th>أمثلة</th></tr>
-<tr><td>بيانات الطلاب</td><td>الاسم، الصف والشعبة، اسم المستخدم، الدرجات والحضور والسلوك، الواجبات</td></tr>
-<tr><td>بيانات أولياء الأمور</td><td>الاسم، رقم الهاتف، ارتباطهم بأبنائهم، المراسلات مع المدرسة</td></tr>
-<tr><td>بيانات الموظفين والمعلمين</td><td>الاسم، الدور الوظيفي، الصلاحيات، جداول الحصص</td></tr>
-<tr><td>البيانات المالية</td><td>الرسوم والأقساط وحركات المقصف (سجلات مالية داخلية، دون تخزين بيانات بطاقات مصرفية)</td></tr>
-<tr><td>الوسائط والمحتوى</td><td>الإعلانات، صور الأنشطة والألبومات، الملفات التعليمية</td></tr>
-<tr><td>بيانات تقنية</td><td>جلسات الدخول، نوع الجهاز والمتصفح، سجلات الأخطاء، إعدادات المظهر المحفوظة على الجهاز</td></tr></table>
-<p>نجمع الحد الأدنى اللازم لتشغيل خدمات المدرسة فقط.</p>`],
-['كيف نستخدم البيانات',`<ul><li>تشغيل الحسابات وتسجيل الدخول وعرض المعلومات لأصحابها.</li><li>تمكين المدرسة من إدارة الدراسة والمتابعة والتواصل مع أولياء الأمور.</li><li>إرسال الإشعارات والإعلانات التي تقررها المدرسة.</li><li>حماية الحسابات ومنع إساءة الاستخدام وإصلاح الأعطال وتحسين الأداء.</li></ul><p>لا نستخدم بيانات الطلاب لأي غرض تجاري أو تسويقي.</p>`],
-['الصلاحيات وحدود الاطلاع',`<ul><li><b>الطالب:</b> يرى بياناته فقط.</li><li><b>ولي الأمر:</b> يرى بيانات أبنائه المرتبطين بحسابه فقط.</li><li><b>المعلم:</b> يرى طلاب صفوفه ومواده فقط.</li><li><b>إدارة المدرسة:</b> تدير بيانات مدرستها وحدها، وتحدد صلاحيات موظفيها.</li><li><b>مزوّد المنصة:</b> لا يطّلع على بيانات المدرسة إلا عند الضرورة التقنية (دعم أو صيانة) وبطلب المدرسة أو بموافقتها.</li></ul><p>تُعزل بيانات كل مدرسة عن غيرها عزلاً منطقياً بقواعد وصول على مستوى قاعدة البيانات.</p>`],
-['حماية البيانات',`<ul><li>تشفير الاتصال بين التطبيق والخادم (HTTPS).</li><li>مصادقة المستخدمين وتخزين كلمات المرور بصورة مشفّرة (مجزّأة) لا يمكن قراءتها.</li><li>قواعد صلاحيات صارمة على جداول البيانات، ونسخ احتياطية دورية.</li><li>تنقية المحتوى المُدخل لمنع الشيفرات الخبيثة.</li></ul>
-<p>لا يوجد نظام محصّن بالكامل، ولذلك نلتزم بإبلاغ المدرسة دون تأخير عند اكتشاف أي اختراق يمس بياناتها، مع بيان نطاقه وما اتُّخذ لمعالجته.</p>`],
-['الاستضافة ومقدّمو الخدمات',`<p>تُخزَّن البيانات لدى مزوّد استضافة سحابية موثوق (Supabase)، وقد تقع خوادمه خارج ليبيا. لا نشارك البيانات مع أي طرف ثالث إلا مقدّمي الخدمات التقنية اللازمين لتشغيل المنصة، وبالقدر اللازم فقط، وبما يلزمهم بحماية السرّية. وقد نفصح عن بيانات إذا ألزمتنا بذلك جهة قضائية مختصة، وسنُخطر المدرسة بذلك ما لم يمنع القانون.</p>`],
-['بيانات الأطفال',`<p>معظم مستخدمي المنصة قاصرون، لذلك تُنشأ حساباتهم عبر المدرسة وبمعرفة أولياء أمورهم، ولا نتيح لهم مراسلة جهات خارجية ولا نشر بيانات علنية. تتحمل المدرسة مسؤولية الحصول على موافقة أولياء الأمور اللازمة (بما فيها نشر صور الأنشطة) وفق أنظمتها.</p>`],
-['مدة الاحتفاظ والحذف',`<ul><li>نحتفظ بالبيانات طوال مدة اشتراك المدرسة في المنصة.</li><li>عند انتهاء الاشتراك أو طلب المدرسة الإنهاء: تُسلَّم لها نسخة كاملة بصيغة قابلة للقراءة، ثم تُحذف بياناتها من أنظمتنا النشطة خلال 30 يوماً، وتُمحى النسخ الاحتياطية خلال 90 يوماً.</li><li>يمكن للمدرسة طلب حذف سجل فرد (طالب أو موظف) في أي وقت.</li></ul>`],
-['حقوق الأفراد والمدرسة',`<p>للمدرسة ولأصحاب البيانات (أو أولياء أمورهم) طلب الاطلاع على البيانات أو تصحيحها أو حذفها أو تصديرها. تُوجَّه الطلبات إلى إدارة المدرسة أولاً، وتتولى المنصة تنفيذ ما تطلبه المدرسة تقنياً في أسرع وقت.</p>`],
-['التخزين على الجهاز وملفات الارتباط',`<p>يحفظ التطبيق على جهازك إعدادات بسيطة (كالمظهر الفاتح/الداكن وحالة الدخول) لتحسين التجربة فقط. لا نستخدم أدوات تتبّع إعلانية. ويمكنك مسحها من إعدادات المتصفح، علماً أنك ستحتاج حينها إلى تسجيل الدخول من جديد.</p>`],
-['التزامات المدرسة المنضمة',`<ul><li>إدخال بيانات صحيحة ومحدّثة، وعدم رفع محتوى مخالف للأنظمة أو يمس خصوصية الغير.</li><li>تسليم بيانات الدخول لأصحابها فقط، وسحب صلاحيات من تنتهي علاقتهم بالمدرسة.</li><li>إبلاغ أولياء الأمور والمعلمين بهذه السياسة والحصول على الموافقات اللازمة.</li><li>إبلاغنا فوراً عند الاشتباه في اختراق أي حساب.</li></ul>`],
-['التعديلات على السياسة',`<p>قد نحدّث هذه السياسة، وسنُخطر المدرسة بأي تغيير جوهري قبل سريانه بمدة معقولة. استمرار استخدام المنصة بعد التحديث يعني الموافقة عليه.</p>`],
-['التواصل معنا',`<p>لأي استفسار أو طلب يخص الخصوصية، تواصل مع إدارة المدرسة، أو مع فريق المنصة عبر قناة الدعم المعتمدة لديكم.</p>`]
-];
-function build(){
- var o=document.getElementById('prv');if(o)return o;
- o=document.createElement('div');o.id='prv';o.setAttribute('role','dialog');o.setAttribute('aria-label','سياسة الخصوصية');
- var h='<div class="ph"><button type="button" id="prvx" aria-label="رجوع"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:block;margin:auto"><path d="M9 5l7 7-7 7"/></svg></button><b>سياسة الخصوصية</b></div><div class="pb"><div class="in"><div class="lead"><b>سياسة الخصوصية وحماية البيانات للمدارس المنضمة</b><small>'+PLAT+' · آخر تحديث: '+UPD+'</small><p>بانضمام المدرسة إلى المنصة، فإنها توافق على ما ورد أدناه.</p></div>';
- sec.forEach(function(x,i){h+='<h3><i>'+(i+1)+'</i>'+x[0]+'</h3>'+x[1]});
- h+='<p style="text-align:center;color:var(--mut);font-size:12px;margin-top:24px">'+PLAT+' © 2026</p></div></div>';
- o.innerHTML=h;document.body.appendChild(o);
- o.querySelector('#prvx').addEventListener('click',closePrv);
- return o}
-function openPrv(){var o=build();o.classList.add('on');o.querySelector('.pb').scrollTop=0;document.documentElement.style.overflow='hidden'}
-function closePrv(){var o=document.getElementById('prv');if(o)o.classList.remove('on');document.documentElement.style.overflow=''}
-window.openPrivacy=openPrv;
-addEventListener('keydown',function(e){if(e.key==='Escape')closePrv()});
-/* رابط في شاشة الدخول */
-function addLogin(){}
-/* صف في الملف الشخصي */
-function addRow(){var pf=document.getElementById('pfs');if(!pf||document.getElementById('pf-prv'))return;
- var g=pf.querySelector('.pf-out');if(!g)return;
- var sec=document.createElement('div');sec.className='ps-g';
- sec.innerHTML='<button type="button" class="ps-r" id="pf-prv" style="--c:#2f3a49"><span class="ps-i"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg></span><span class="ps-t"><b>سياسة الخصوصية</b><small>كيف نحمي بيانات المدرسة</small></span></button>';
- g.parentNode.insertBefore(sec,g);sec.querySelector('button').addEventListener('click',openPrv)}
-function hook(){if(typeof window.drawPf==='function'&&!window.drawPf.__p){var d=window.drawPf;window.drawPf=function(){var r=d.apply(this,arguments);try{addRow()}catch(e){}return r};window.drawPf.__p=1}}
-function init(){addLogin();hook();try{addRow()}catch(e){}}
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
-addEventListener('load',init);
-})();
-</script>
+
+
+<script>/* ===== دعم قارئ NFC في كل حقل نصي: زر NFC عائم يظهر عند التركيز على أي حقل (إن كان الجهاز يدعم Web NFC)؛ وقارئات USB/بلوتوث تكتب في الحقل المركَّز مباشرة ===== */
+(function(){try{
+ if(window.__nfcAll)return;window.__nfcAll=1;
+ var OK=('NDEFReader' in window),cur=null,btn=null,tm=null,busy=0;
+ var skip=function(e){if(!e||e.disabled||e.readOnly)return 1;if(e.tagName=='TEXTAREA')return 0;if(e.tagName!='INPUT')return 1;if(e.id=='pkv')return 1;return !/^(text|search|tel|number|email|url|)$/i.test(e.type||'')};
+ function mk(){if(btn)return btn;btn=document.createElement('button');btn.type='button';btn.textContent='NFC';btn.setAttribute('aria-label','قراءة بطاقة NFC');
+  btn.style.cssText='position:fixed;z-index:2147483000;display:none;font:700 12px/1 inherit;padding:7px 11px;border-radius:999px;border:1px solid rgba(0,0,0,.15);background:#2f3a49;color:#fff;box-shadow:0 4px 14px rgba(0,0,0,.25);cursor:pointer';
+  btn.addEventListener('pointerdown',function(e){e.preventDefault()});btn.addEventListener('mousedown',function(e){e.preventDefault()});
+  btn.addEventListener('click',scan);document.body.appendChild(btn);return btn}
+ function pos(){if(!cur||!btn)return;var r=cur.getBoundingClientRect(),t=Math.max(4,r.top-30);btn.style.top=t+'px';btn.style.left=Math.max(4,Math.min(innerWidth-70,r.left))+'px'}
+ function say(m){if(!btn)return;btn.textContent=m;clearTimeout(tm);tm=setTimeout(function(){if(btn)btn.textContent='NFC'},2500)}
+ function fill(el,v){var p=el.tagName=='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,d=Object.getOwnPropertyDescriptor(p,'value');if(d&&d.set)d.set.call(el,v);else el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}))}
+ async function scan(){var el=cur;if(!el||busy)return;busy=1;try{var r=new NDEFReader();await r.scan();say('قرّب البطاقة…');
+   r.onreading=function(e){var v='';try{for(var i=0;i<e.message.records.length;i++){var c=e.message.records[i];if(c.recordType=='text'||c.recordType=='url'){v=new TextDecoder(c.encoding||'utf-8').decode(c.data);break}}}catch(x){}if(!v)v=e.serialNumber||'';v=String(v).trim();if(v){fill(el,v);say('✓ تمت القراءة')}busy=0};
+   r.onreadingerror=function(){say('تعذّرت القراءة');busy=0}}catch(x){say('NFC غير مفعّل');busy=0}}
+ document.addEventListener('focusin',function(e){var el=e.target;if(skip(el)){return}cur=el;if(!OK)return;mk();btn.style.display='block';pos()},true);
+ document.addEventListener('focusout',function(){setTimeout(function(){var a=document.activeElement;if(a&&!skip(a))return;if(btn&&!busy)btn.style.display='none';cur=null},200)},true);
+ addEventListener('scroll',pos,true);addEventListener('resize',pos);
+}catch(x){console.error('nfc all',x)}})();
+<\/script>
 </body></html>
